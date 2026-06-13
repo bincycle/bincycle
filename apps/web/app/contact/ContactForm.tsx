@@ -16,6 +16,8 @@ interface FormState {
 
 const INITIAL: FormState = { name: "", email: "", topic: "", message: "" };
 
+const FORMSPREE_ENDPOINT = process.env.NEXT_PUBLIC_FORMSPREE_URL!;
+
 export default function ContactForm() {
   const [form, setForm] = useState<FormState>(INITIAL);
   const [submitting, setSubmitting] = useState(false);
@@ -23,18 +25,36 @@ export default function ContactForm() {
   const onChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
 
-  const onSubmit = (e: FormEvent<HTMLFormElement>) => {
+  const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!form.name || !form.email || !form.message) {
       toast.error("Please fill in name, email and message.");
       return;
     }
     setSubmitting(true);
-    setTimeout(() => {
+
+    try {
+      const res = await fetch(FORMSPREE_ENDPOINT, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(form),
+      });
+
+      if (res.ok) {
+        toast.success("Message sent — we'll write back within 24 hours.");
+        setForm(INITIAL);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Something went wrong. Please try again.");
+      }
+    } catch {
+      toast.error("Network error. Please try again.");
+    } finally {
       setSubmitting(false);
-      setForm(INITIAL);
-      toast.success("Message sent — we'll write back within 24 hours.");
-    }, 800);
+    }
   };
 
   return (
