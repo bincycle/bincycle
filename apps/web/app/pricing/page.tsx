@@ -123,7 +123,7 @@ export default function PricingPage() {
                 ))}
               </ul>
               <Link
-                href="/dashboard/book-pickup"
+                href="https://customer.bincycle.in/book-pickup"
                 data-testid={`pricing-cta-${plan.id}`}
                 className={`mt-8 inline-flex items-center justify-center rounded-sm px-5 py-3.5 text-sm font-medium transition-colors ${
                   plan.accent

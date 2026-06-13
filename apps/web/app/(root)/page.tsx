@@ -50,7 +50,7 @@ export default function HomePage() {
               <SectionReveal delay={0.15}>
                 <div className="mt-9 flex flex-wrap items-center gap-3">
                   <Link
-                    href="/dashboard/book-pickup"
+                    href="https://customer.bincycle.in/book-pickup"
                     data-testid="hero-cta-book"
                     className="group inline-flex items-center gap-2 rounded-sm bg-[#284226] px-6 py-3.5 text-base font-medium text-[#F7F5F0] transition-colors hover:bg-[#1C2E1A]"
                   >
@@ -322,7 +322,7 @@ export default function HomePage() {
             className="lg:col-span-4 flex lg:justify-end"
           >
             <Link
-              href="/dashboard/book-pickup"
+              href="https://customer.bincycle.in/book-pickup"
               data-testid="cta-dark-book"
               className="group inline-flex items-center gap-2 rounded-sm bg-[#C45B38] px-7 py-4 text-base font-medium text-[#F7F5F0] hover:bg-[#A64A2B] transition-colors"
             >

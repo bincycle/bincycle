@@ -60,7 +60,7 @@ export const MarketingNav = () => {
             Sign in
           </Link>
           <Link
-            href="/dashboard/book-pickup"
+            href="https://customer.bincycle.in/book-pickup"
             data-testid="nav-book-pickup-cta"
             className="group inline-flex items-center gap-2 rounded-sm bg-[#284226] px-5 py-2.5 text-sm font-medium text-[#F7F5F0] transition-colors hover:bg-[#1C2E1A]"
           >
@@ -112,7 +112,7 @@ export const MarketingNav = () => {
               Sign in
             </Link>
             <Link
-              href="/dashboard/book-pickup"
+              href="https://customer.bincycle.in/book-pickup"
               onClick={() => setOpen(false)}
               data-testid="nav-mobile-cta"
               className="inline-flex items-center justify-between rounded-sm bg-[#C45B38] px-4 py-3 text-sm font-medium text-[#F7F5F0] hover:bg-[#A64A2B]"
