@@ -16,20 +16,20 @@ interface TeamMember {
 
 const team: TeamMember[] = [
   {
-    name: "Aanya Rao",
+    name: "Sudhanshu N",
     role: "Co-founder & CEO",
     bio: "Ex-product at a logistics unicorn. Quit when her own building's waste ended up in a lake.",
   },
   {
-    name: "Karan Mehta",
+    name: "Varshith R",
     role: "Co-founder & COO",
     bio: "Spent 9 years building urban delivery routes. Now routing the other direction.",
   },
-  {
-    name: "Sneha Pillai",
-    role: "Head of Recycling",
-    bio: "Materials scientist who'd rather see things reborn than buried.",
-  },
+  // {
+    // name: "Sneha Pillai",
+    // role: "Head of Recycling",
+    // bio: "Materials scientist who'd rather see things reborn than buried.",
+  // },
 ];
 
 export default function AboutPage() {
@@ -151,9 +151,9 @@ export default function AboutPage() {
               <p className="font-mono-label text-xs text-[#C45B38] mt-1">
                 {m.role}
               </p>
-              <p className="mt-4 text-sm text-[#596155] leading-relaxed">
+              {/* <p className="mt-4 text-sm text-[#596155] leading-relaxed">
                 {m.bio}
-              </p>
+              </p> */}
             </SectionReveal>
           ))}
         </div>
