@@ -6,6 +6,7 @@
     "build": "turbo build",
     "dev": "turbo dev",
     "dev:web": "turbo run dev --filter=@bincycle/web",
+    "dev:customer": "turbo run dev --filter=@bincycle/customer",
     "lint": "turbo lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
   },
