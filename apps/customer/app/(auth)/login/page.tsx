@@ -8,7 +8,22 @@ import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
 import { Checkbox } from "@workspace/ui/components/checkbox";
 import { toast } from "sonner";
+import { createBrowserClient } from "@supabase/ssr";
 
+// ---------------------------------------------------------------------------
+// Supabase browser client
+// Set these in your .env.local:
+//   NEXT_PUBLIC_SUPABASE_URL
+//   NEXT_PUBLIC_SUPABASE_ANON_KEY
+// ---------------------------------------------------------------------------
+const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
+);
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface FormState {
@@ -19,6 +34,33 @@ interface FormState {
 
 type FormErrors = Partial<Record<keyof FormState, string>>;
 
+// Map Supabase error messages to field-level or toast errors.
+function parseSupabaseError(message: string): { field: keyof FormState | null; text: string } {
+    const m = message.toLowerCase();
+    if (
+        m.includes("invalid login") ||
+        m.includes("invalid credentials") ||
+        m.includes("wrong password") ||
+        m.includes("user not found")
+    ) {
+        // Intentionally vague — don't confirm whether the email exists.
+        return { field: "password", text: "Email or password is incorrect." };
+    }
+    if (m.includes("email not confirmed")) {
+        return {
+            field: "email",
+            text: "Please confirm your email address before signing in.",
+        };
+    }
+    if (m.includes("too many requests") || m.includes("rate limit")) {
+        return { field: null, text: "Too many attempts. Please wait a moment and try again." };
+    }
+    return { field: null, text: message };
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 export default function LoginPage() {
     const router = useRouter();
     const [form, setForm] = useState<FormState>({
@@ -48,16 +90,48 @@ export default function LoginPage() {
         }
     };
 
-    const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    // -----------------------------------------------------------------------
+    // Submit → Supabase Auth
+    // -----------------------------------------------------------------------
+    const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         if (!validate()) return;
+
         setSubmitting(true);
-        // Mocked auth — frontend only
-        setTimeout(() => {
-            setSubmitting(false);
-            toast.success("Signed in. Welcome back.");
-            router.push("/dashboard/book-pickup");
-        }, 900);
+
+        const { error } = await supabase.auth.signInWithPassword({
+            email: form.email,
+            password: form.password,
+        });
+
+        setSubmitting(false);
+
+        if (error) {
+            const { field, text } = parseSupabaseError(error.message);
+            if (field) {
+                setErrors((er) => ({ ...er, [field]: text }));
+            } else {
+                toast.error(text);
+            }
+            return;
+        }
+
+        // Supabase persists the session in a cookie automatically.
+        // The `remember` checkbox controls whether we store an additional
+        // long-lived preference; Supabase's default session is already
+        // persistent. To shorten the session when remember=false, you can
+        // call supabase.auth.updateUser or manage expiry server-side.
+        if (!form.remember) {
+            // Mark session as tab-only so middleware/server can check this
+            // and enforce shorter expiry if needed.
+            sessionStorage.setItem("session_transient", "1");
+        } else {
+            sessionStorage.removeItem("session_transient");
+        }
+
+        toast.success("Signed in. Welcome back.");
+        router.push("/dashboard/book-pickup");
+        router.refresh(); // sync Next.js server components with the new session
     };
 
     return (

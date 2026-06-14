@@ -2,13 +2,27 @@
 
 import { useMemo, useState, ChangeEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Eye, EyeOff, Loader2, ArrowRight } from "lucide-react";
+import { Eye, EyeOff, Loader2, ArrowRight, MailCheck } from "lucide-react";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
 import { Checkbox } from "@workspace/ui/components/checkbox";
 import { toast } from "sonner";
+import { createBrowserClient } from "@supabase/ssr";
 
+// ---------------------------------------------------------------------------
+// Supabase browser client
+// Reads from Next.js public env vars — set these in your .env.local:
+//   NEXT_PUBLIC_SUPABASE_URL
+//   NEXT_PUBLIC_SUPABASE_ANON_KEY
+// ---------------------------------------------------------------------------
+const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
+);
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const phoneRe = /^[0-9+\-\s]{7,15}$/;
 
@@ -42,8 +56,27 @@ const STRENGTH_COLOR = [
     "bg-[#284226]",
 ] as const;
 
+// ---------------------------------------------------------------------------
+// Map common Supabase Auth error messages to field-level errors
+// ---------------------------------------------------------------------------
+function parseSupabaseError(message: string): { field: keyof FormState | null; text: string } {
+    const m = message.toLowerCase();
+    if (m.includes("email") && (m.includes("already") || m.includes("taken") || m.includes("registered"))) {
+        return { field: "email", text: "An account with this email already exists." };
+    }
+    if (m.includes("password") && m.includes("short")) {
+        return { field: "password", text: "Password is too short." };
+    }
+    if (m.includes("invalid email")) {
+        return { field: "email", text: "Please enter a valid email address." };
+    }
+    return { field: null, text: message };
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 export default function RegisterPage() {
-    const router = useRouter();
     const [form, setForm] = useState<FormState>({
         name: "",
         email: "",
@@ -55,9 +88,15 @@ export default function RegisterPage() {
     const [errors, setErrors] = useState<FormErrors>({});
     const [submitting, setSubmitting] = useState(false);
     const [show, setShow] = useState(false);
+    // After successful signup Supabase sends a confirmation email.
+    // Show a holding screen instead of redirecting immediately.
+    const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
 
     const strength = useMemo(() => scorePassword(form.password), [form.password]);
 
+    // -----------------------------------------------------------------------
+    // Client-side validation (unchanged from original)
+    // -----------------------------------------------------------------------
     const validate = (): boolean => {
         const e: FormErrors = {};
         if (!form.name.trim()) e.name = "Please tell us your name.";
@@ -83,17 +122,75 @@ export default function RegisterPage() {
         }
     };
 
-    const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    // -----------------------------------------------------------------------
+    // Submit → Supabase Auth
+    // -----------------------------------------------------------------------
+    const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         if (!validate()) return;
+
         setSubmitting(true);
-        setTimeout(() => {
-            setSubmitting(false);
-            toast.success("Account created. Let's book your first pickup.");
-            router.push("/dashboard/book-pickup");
-        }, 1000);
+
+        const { error } = await supabase.auth.signUp({
+            email: form.email,
+            password: form.password,
+            options: {
+                // Store display name and optional phone in user_metadata.
+                // Access later via: supabase.auth.getUser() → user.user_metadata
+                data: {
+                    full_name: form.name.trim(),
+                    ...(form.phone ? { phone: form.phone.trim() } : {}),
+                },
+                // Supabase will redirect here after the user clicks the
+                // confirmation link. Adjust to match your app's flow.
+                emailRedirectTo: `${window.location.origin}/auth/callback`,
+            },
+        });
+
+        setSubmitting(false);
+
+        if (error) {
+            const { field, text } = parseSupabaseError(error.message);
+            if (field) {
+                setErrors((er) => ({ ...er, [field]: text }));
+            } else {
+                toast.error(text);
+            }
+            return;
+        }
+
+        // Success — Supabase has sent a confirmation email.
+        setAwaitingConfirmation(true);
     };
 
+    // -----------------------------------------------------------------------
+    // Post-signup: email confirmation holding screen
+    // -----------------------------------------------------------------------
+    if (awaitingConfirmation) {
+        return (
+            <div data-testid="register-confirmation" className="flex flex-col items-start gap-4">
+                <MailCheck size={40} className="text-[#284226]" />
+                <h1 className="font-display font-black tracking-tighter text-4xl sm:text-5xl text-[#121710]">
+                    Check your inbox.
+                </h1>
+                <p className="text-[#596155] max-w-sm">
+                    We sent a confirmation link to{" "}
+                    <span className="font-medium text-[#121710]">{form.email}</span>.
+                    Click it to activate your account, then come back to sign in.
+                </p>
+                <Link
+                    href="/login"
+                    className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-[#C45B38] hover:underline underline-offset-4"
+                >
+                    Go to sign in <ArrowRight size={14} />
+                </Link>
+            </div>
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Registration form (visual markup unchanged from original)
+    // -----------------------------------------------------------------------
     return (
         <div data-testid="register-page">
             <p className="font-mono-label text-xs text-[#596155]">
@@ -122,10 +219,7 @@ export default function RegisterPage() {
             >
                 <div className="grid gap-5 sm:grid-cols-2">
                     <div>
-                        <Label
-                            htmlFor="name"
-                            className="font-mono-label text-xs text-[#596155]"
-                        >
+                        <Label htmlFor="name" className="font-mono-label text-xs text-[#596155]">
                             Full name
                         </Label>
                         <Input
@@ -141,19 +235,13 @@ export default function RegisterPage() {
                             }`}
                         />
                         {errors.name && (
-                            <p
-                                data-testid="register-error-name"
-                                className="mt-1.5 text-xs text-[#C45B38]"
-                            >
+                            <p data-testid="register-error-name" className="mt-1.5 text-xs text-[#C45B38]">
                                 {errors.name}
                             </p>
                         )}
                     </div>
                     <div>
-                        <Label
-                            htmlFor="phone"
-                            className="font-mono-label text-xs text-[#596155]"
-                        >
+                        <Label htmlFor="phone" className="font-mono-label text-xs text-[#596155]">
                             Phone (optional)
                         </Label>
                         <Input
@@ -169,10 +257,7 @@ export default function RegisterPage() {
                             }`}
                         />
                         {errors.phone && (
-                            <p
-                                data-testid="register-error-phone"
-                                className="mt-1.5 text-xs text-[#C45B38]"
-                            >
+                            <p data-testid="register-error-phone" className="mt-1.5 text-xs text-[#C45B38]">
                                 {errors.phone}
                             </p>
                         )}
@@ -180,10 +265,7 @@ export default function RegisterPage() {
                 </div>
 
                 <div>
-                    <Label
-                        htmlFor="email"
-                        className="font-mono-label text-xs text-[#596155]"
-                    >
+                    <Label htmlFor="email" className="font-mono-label text-xs text-[#596155]">
                         Email
                     </Label>
                     <Input
@@ -200,20 +282,14 @@ export default function RegisterPage() {
                         }`}
                     />
                     {errors.email && (
-                        <p
-                            data-testid="register-error-email"
-                            className="mt-1.5 text-xs text-[#C45B38]"
-                        >
+                        <p data-testid="register-error-email" className="mt-1.5 text-xs text-[#C45B38]">
                             {errors.email}
                         </p>
                     )}
                 </div>
 
                 <div>
-                    <Label
-                        htmlFor="password"
-                        className="font-mono-label text-xs text-[#596155]"
-                    >
+                    <Label htmlFor="password" className="font-mono-label text-xs text-[#596155]">
                         Password
                     </Label>
                     <div className="relative mt-2">
@@ -248,9 +324,7 @@ export default function RegisterPage() {
                                         key={i}
                                         data-testid={`register-strength-bar-${i}`}
                                         className={`h-1 flex-1 rounded-sm ${
-                                            i < strength
-                                                ? STRENGTH_COLOR[strength]
-                                                : "bg-[#D1CDBC]"
+                                            i < strength ? STRENGTH_COLOR[strength] : "bg-[#D1CDBC]"
                                         }`}
                                     />
                                 ))}
@@ -264,20 +338,14 @@ export default function RegisterPage() {
                         </div>
                     )}
                     {errors.password && (
-                        <p
-                            data-testid="register-error-password"
-                            className="mt-1.5 text-xs text-[#C45B38]"
-                        >
+                        <p data-testid="register-error-password" className="mt-1.5 text-xs text-[#C45B38]">
                             {errors.password}
                         </p>
                     )}
                 </div>
 
                 <div>
-                    <Label
-                        htmlFor="confirm"
-                        className="font-mono-label text-xs text-[#596155]"
-                    >
+                    <Label htmlFor="confirm" className="font-mono-label text-xs text-[#596155]">
                         Confirm password
                     </Label>
                     <Input
@@ -294,10 +362,7 @@ export default function RegisterPage() {
                         }`}
                     />
                     {errors.confirm && (
-                        <p
-                            data-testid="register-error-confirm"
-                            className="mt-1.5 text-xs text-[#C45B38]"
-                        >
+                        <p data-testid="register-error-confirm" className="mt-1.5 text-xs text-[#C45B38]">
                             {errors.confirm}
                         </p>
                     )}
@@ -306,35 +371,24 @@ export default function RegisterPage() {
                 <label className="flex items-start gap-2 text-sm text-[#596155]">
                     <Checkbox
                         checked={form.agree}
-                        onCheckedChange={(v) =>
-                            setForm((f) => ({ ...f, agree: !!v }))
-                        }
+                        onCheckedChange={(v) => setForm((f) => ({ ...f, agree: !!v }))}
                         data-testid="register-agree-checkbox"
                         className="mt-0.5 border-[#D1CDBC] data-[state=checked]:bg-[#284226] data-[state=checked]:border-[#284226]"
                     />
                     <span>
                         I agree to Bincycle's{" "}
-                        <Link
-                            href="/terms-of-service"
-                            className="underline underline-offset-2 hover:text-[#121710]"
-                        >
+                        <Link href="/terms-of-service" className="underline underline-offset-2 hover:text-[#121710]">
                             Terms
                         </Link>{" "}
                         and{" "}
-                        <Link
-                            href="/privacy-policy"
-                            className="underline underline-offset-2 hover:text-[#121710]"
-                        >
+                        <Link href="/privacy-policy" className="underline underline-offset-2 hover:text-[#121710]">
                             Privacy Policy
                         </Link>
                         .
                     </span>
                 </label>
                 {errors.agree && (
-                    <p
-                        data-testid="register-error-agree"
-                        className="-mt-3 text-xs text-[#C45B38]"
-                    >
+                    <p data-testid="register-error-agree" className="-mt-3 text-xs text-[#C45B38]">
                         {errors.agree}
                     </p>
                 )}

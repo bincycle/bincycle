@@ -10,6 +10,8 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.0",
+    "@supabase/supabase-js": "^2.108.1",
     "@workspace/data": "workspace:*",
     "@workspace/supabase": "workspace:*",
     "@workspace/ui": "workspace:*",
