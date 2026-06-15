@@ -1,20 +1,32 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Camera, Check, Loader2, Pencil, X } from "lucide-react";
 import { Input } from "@workspace/ui/components/input";
 import { Label } from "@workspace/ui/components/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@workspace/ui/components/avatar";
 import { toast } from "sonner";
-import { getProfile, saveProfile } from "@workspace/data/accountStorage";
-import { fileToDataUrl } from "@workspace/data/bookingPersistence";
+import { createClient } from "@workspace/supabase/client";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const phoneRe = /^[+0-9\-\s]{7,18}$/;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Profile = ReturnType<typeof getProfile>;
+interface ProfileRow {
+  id: string;
+  full_name: string;
+  phone: string | null;
+  avatar_url: string | null;
+}
+
+interface FormState {
+  name: string;
+  email: string;
+  phone: string;
+  avatar: string; // local preview url or remote url
+}
 
 interface FormErrors {
   name?: string;
@@ -44,13 +56,58 @@ const TabHeader = ({ title, description, action }: TabHeaderProps) => (
 
 // ─── ProfileTab ───────────────────────────────────────────────────────────────
 
-export const ProfileTab = () => {
-  const [initial, setInitial] = useState<Profile>(getProfile);
-  const [form, setForm] = useState<Profile>(initial);
+interface ProfileTabProps {
+  user: SupabaseUser;
+}
+
+export const ProfileTab = ({ user }: ProfileTabProps) => {
+  const supabase = createClient();
+
+  const emptyForm: FormState = {
+    name: "",
+    email: user.email ?? "",
+    phone: "",
+    avatar: "",
+  };
+
+  const [initial, setInitial] = useState<FormState>(emptyForm);
+  const [form, setForm] = useState<FormState>(emptyForm);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loadingProfile, setLoadingProfile] = useState(true);
   const [errors, setErrors] = useState<FormErrors>({});
+  const [pendingAvatarFile, setPendingAvatarFile] = useState<File | null>(null);
   const avatarInput = useRef<HTMLInputElement>(null);
+
+  // ── Fetch profile from Supabase on mount ──────────────────────────────────
+  const fetchProfile = useCallback(async () => {
+    setLoadingProfile(true);
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, full_name, phone, avatar_url")
+      .eq("id", user.id)
+      .single<ProfileRow>();
+
+    if (error) {
+      toast.error("Couldn't load your profile.");
+      setLoadingProfile(false);
+      return;
+    }
+
+    const loaded: FormState = {
+      name: data.full_name ?? "",
+      email: user.email ?? "",
+      phone: data.phone ?? "",
+      avatar: data.avatar_url ?? "",
+    };
+    setInitial(loaded);
+    setForm(loaded);
+    setLoadingProfile(false);
+  }, [user.id, user.email]);
+
+  useEffect(() => {
+    fetchProfile();
+  }, [fetchProfile]);
 
   useEffect(() => {
     setForm(initial);
@@ -58,6 +115,7 @@ export const ProfileTab = () => {
 
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
 
+  // ── Validation ────────────────────────────────────────────────────────────
   const validate = () => {
     const e: FormErrors = {};
     if (!form.name?.trim()) e.name = "Please add your name.";
@@ -69,6 +127,7 @@ export const ProfileTab = () => {
     return Object.keys(e).length === 0;
   };
 
+  // ── Field change ──────────────────────────────────────────────────────────
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setForm((f) => ({ ...f, [name]: value }));
@@ -76,38 +135,127 @@ export const ProfileTab = () => {
       setErrors((er) => ({ ...er, [name]: undefined }));
   };
 
-  const onAvatar = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ── Avatar selection (local preview only, upload happens on save) ─────────
+  const onAvatar = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
       toast.error("Avatar must be under 2 MB.");
       return;
     }
+    const previewUrl = URL.createObjectURL(file);
+    setForm((f) => ({ ...f, avatar: previewUrl }));
+    setPendingAvatarFile(file);
+  };
+
+  // ── Upload avatar to Supabase Storage ─────────────────────────────────────
+  const uploadAvatar = async (file: File): Promise<string | null> => {
+    const ext = file.name.split(".").pop();
+    const path = `${user.id}/avatar.${ext}`;
+
+    const { error } = await supabase.storage
+      .from("avatars")
+      .upload(path, file, { upsert: true, contentType: file.type });
+
+    if (error) {
+      toast.error("Avatar upload failed.");
+      return null;
+    }
+
+    const { data } = supabase.storage.from("avatars").getPublicUrl(path);
+    // Bust the CDN cache by appending a timestamp
+    return `${data.publicUrl}?t=${Date.now()}`;
+  };
+
+  // ── Save ──────────────────────────────────────────────────────────────────
+  const onSave = async () => {
+    if (!validate()) return;
+    setSaving(true);
+
     try {
-      const url = await fileToDataUrl(file);
-      setForm((f) => ({ ...f, avatar: url }));
-    } catch {
-      toast.error("Couldn't read that image.");
+      let avatarUrl = initial.avatar;
+
+      // 1. Upload avatar if a new file was picked
+      if (pendingAvatarFile) {
+        const uploaded = await uploadAvatar(pendingAvatarFile);
+        if (!uploaded) {
+          setSaving(false);
+          return;
+        }
+        avatarUrl = uploaded;
+        setPendingAvatarFile(null);
+      }
+
+      // 2. Update the profiles row
+      const { error: profileError } = await supabase
+        .from("profiles")
+        .update({
+          full_name: form.name.trim(),
+          phone: form.phone.trim() || null,
+          avatar_url: avatarUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", user.id);
+
+      if (profileError) throw profileError;
+
+      // 3. If email changed, update auth email (triggers confirmation email)
+      if (form.email !== user.email) {
+        const { error: emailError } = await supabase.auth.updateUser({
+          email: form.email,
+        });
+        if (emailError) throw emailError;
+        toast.info("Check your inbox to confirm your new email address.");
+      }
+
+      const saved: FormState = { ...form, avatar: avatarUrl };
+      setInitial(saved);
+      setForm(saved);
+      setEditing(false);
+      toast.success("Profile saved.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Something went wrong.";
+      toast.error(message);
+    } finally {
+      setSaving(false);
     }
   };
 
-  const onSave = () => {
-    if (!validate()) return;
-    setSaving(true);
-    setTimeout(() => {
-      saveProfile(form);
-      setInitial(form);
-      setEditing(false);
-      setSaving(false);
-      toast.success("Profile saved.");
-    }, 500);
-  };
-
+  // ── Cancel ────────────────────────────────────────────────────────────────
   const onCancel = () => {
     setForm(initial);
     setErrors({});
+    setPendingAvatarFile(null);
     setEditing(false);
   };
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  if (loadingProfile) {
+    return (
+      <div data-testid="account-tab-profile" className="space-y-6">
+        <div className="pb-6 mb-6 border-b border-[#D1CDBC]">
+          <div className="h-7 w-32 rounded-sm bg-[#EDE9DC] animate-pulse mb-2" />
+          <div className="h-4 w-72 rounded-sm bg-[#EDE9DC] animate-pulse" />
+        </div>
+        <div className="flex items-center gap-5">
+          <div className="h-20 w-20 rounded-full bg-[#EDE9DC] animate-pulse" />
+          <div className="space-y-2">
+            <div className="h-5 w-40 rounded-sm bg-[#EDE9DC] animate-pulse" />
+            <div className="h-4 w-56 rounded-sm bg-[#EDE9DC] animate-pulse" />
+          </div>
+        </div>
+        <div className="grid gap-5 sm:grid-cols-2 mt-8">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className={i === 2 ? "sm:col-span-2" : ""}>
+              <div className="h-3 w-20 rounded-sm bg-[#EDE9DC] animate-pulse mb-2" />
+              <div className="h-12 rounded-sm bg-[#EDE9DC] animate-pulse" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div data-testid="account-tab-profile">

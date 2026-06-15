@@ -3,10 +3,7 @@ import AccountClient from "./AccountClient";
 
 // useSearchParams() inside AccountClient requires a Suspense boundary.
 // Next.js will statically render this page shell and stream in the
-// client component once the JS bundle hydrates. Without Suspense,
-// Next.js throws at build time:
-//   "useSearchParams() should be wrapped in a suspense boundary"
-
+// client component once the JS bundle hydrates.
 export default function AccountPage() {
   return (
     <Suspense

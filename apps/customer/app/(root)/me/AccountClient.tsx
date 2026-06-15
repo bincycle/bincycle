@@ -9,30 +9,29 @@ import {
   Bell,
   ShieldCheck,
   CreditCard,
-  // Activity as ActivityIcon,
   ChevronRight,
 } from "lucide-react";
+import { createClient } from "@workspace/supabase/client";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 import ProfileTab from "./components/ProfileTab";
 import AddressesTab from "./components/addresses-tab";
 import NotificationsTab from "./components/notifications-tab";
 import SecurityTab from "./components/security-tab";
 import BillingTab from "./components/billing-tab";
-// import ActivityTab from "./components/ActivityTab";
 
 type TabId =
   | "profile"
   | "addresses"
   | "notifications"
   | "security"
-  | "billing"
-  | "activity";
+  | "billing";
 
 interface Tab {
   id: TabId;
   label: string;
   description: string;
   icon: React.ElementType;
-  Component: React.ComponentType;
+  Component: React.ComponentType<{ user: SupabaseUser }>;
 }
 
 const TABS: Tab[] = [
@@ -71,13 +70,6 @@ const TABS: Tab[] = [
     icon: CreditCard,
     Component: BillingTab,
   },
-  // {
-    // id: "activity",
-    // label: "Activity",
-    // description: "Pickups, coupons, impact",
-    // icon: ActivityIcon,
-    // Component: ActivityTab,
-  // },
 ];
 
 const isValidTab = (id: string | null): id is TabId =>
@@ -87,11 +79,26 @@ export default function AccountClient() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const supabase = createClient();
 
   const initialTab = searchParams.get("tab");
   const [active, setActive] = useState<TabId>(
     isValidTab(initialTab) ? initialTab : "profile"
   );
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch authenticated user once on mount
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (!data.user) {
+        router.replace("/login");
+        return;
+      }
+      setUser(data.user);
+      setLoading(false);
+    });
+  }, []);
 
   // Keep URL in sync without polluting history
   useEffect(() => {
@@ -103,8 +110,18 @@ export default function AccountClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
-  const ActiveComponent =
-    TABS.find((t) => t.id === active)?.Component ?? ProfileTab;
+  const ActiveComponent = TABS.find((t) => t.id === active)?.Component ?? ProfileTab;
+
+  if (loading) {
+    return (
+      <div className="px-4 sm:px-8 lg:px-14 py-6 sm:py-10 lg:py-12">
+        <div className="h-8 w-48 rounded-sm bg-[#EDE9DC] animate-pulse mb-4" />
+        <div className="h-12 w-64 rounded-sm bg-[#EDE9DC] animate-pulse" />
+      </div>
+    );
+  }
+
+  if (!user) return null;
 
   return (
     <div
@@ -221,7 +238,7 @@ export default function AccountClient() {
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.2 }}
             >
-              <ActiveComponent />
+              <ActiveComponent user={user} />
             </motion.div>
           </AnimatePresence>
         </section>
