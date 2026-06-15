@@ -1,11 +1,11 @@
--- create or replace function handle_new_user()
--- returns trigger as $$
--- begin
-  -- insert into profiles (id, full_name, role)
-  -- values (new.id, new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'role');
-  -- return new;
--- end;
--- $$ language plpgsql security definer;
+create or replace function public.get_my_role()
+returns text
+language sql
+security definer
+set search_path = public
+as $$
+  select role from profiles where id = auth.uid();
+$$;
 
 create or replace function public.handle_new_user()
 returns trigger
@@ -29,12 +29,19 @@ begin
 end;
 $$;
 
--- create or replace function public.update_updated_at()
--- returns trigger
--- language plpgsql
--- as $$
--- begin
-  -- new.updated_at = now();
-  -- return new;
--- end;
--- $$;
+create or replace function sync_pickup_payment_status()
+returns trigger as $$
+begin
+  update pickups
+  set
+    payment_status = case new.status
+      when 'paid'           then 'paid'
+      when 'refunded'       then 'refunded'
+      when 'partial_refund' then 'refunded'
+      else 'unpaid'
+    end,
+    updated_at = now()
+  where id = new.pickup_id;
+  return new;
+end;
+$$ language plpgsql security definer;
