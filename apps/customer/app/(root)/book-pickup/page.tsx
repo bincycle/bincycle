@@ -511,11 +511,15 @@ const BookPickup = () => {
         });
 
         if (s3Urls.length > 0) {
-          // Store S3 URLs in the pickup's metadata jsonb column
-          await supabase
+          const { error: imageUpdateError } = await supabase
             .from("pickups")
-            .update({ metadata: { image_urls: s3Urls } } as never)
+            .update({ image_urls: s3Urls })
             .eq("id", pickup.id);
+
+          if (imageUpdateError) {
+            console.error("Failed to save image URLs:", imageUpdateError);
+            toast.error("Pictures uploaded but couldn't be linked to the pickup.");
+          }
         }
       }
 

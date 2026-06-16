@@ -58,6 +58,8 @@ create table pickups (
     'arrived', 'collected', 'completed', 'cancelled'
   )),
 
+  image_urls text[] DEFAULT '{}',
+
   scheduled_date date not null,
   scheduled_slot text,
   picked_up_at timestamptz,
