@@ -1,8 +1,6 @@
-"use client";
-
-import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter, notFound } from "next/navigation";
+import { useMemo } from "react";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { format, parseISO } from "date-fns";
 import {
     ArrowLeft,
@@ -13,64 +11,69 @@ import {
     Image as ImageIcon,
     BadgePercent,
     Leaf,
-    Loader2,
-    type LucideIcon,
+    LucideIcon,
 } from "lucide-react";
-import { createClient } from "@workspace/supabase/client";
-import type { User as SupabaseUser } from "@supabase/supabase-js";
-import PickupTimeline, { type PickupForTimeline } from "@/components/PickupTimeline";
+import { findPickupById, STATUS_META } from "@workspace/data/mockPickups";
+import { savedAddresses, timeSlots } from "@workspace/data/mockData";
+import PickupTimeline from "@/components/PickupTimeline";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Address {
     id: string;
-    label: string | null;
-    address_line1: string;
+    label: string;
+    line1: string;
     city: string;
     pincode: string;
 }
 
-interface Payment {
-    amount: number;
-    status: string;
-    method: string | null;
-    metadata: { coupon_code?: string; discount?: number } | null;
-}
-
-interface Pickup extends PickupForTimeline {
+interface TimeSlot {
     id: string;
-    pickup_id: string;
-    notes: string | null;
-    image_urls: string[] | null;
-    total_amount: number;
-    address: Address | null;
-    payments: Payment[];
+    range: string;
+    label: string;
 }
 
-const SLOT_RANGES: Record<string, { range: string; label: string }> = {
-    slot_8_10: { range: "8 AM – 10 AM", label: "Morning" },
-    slot_10_12: { range: "10 AM – 12 PM", label: "Late Morning" },
-    slot_12_14: { range: "12 PM – 2 PM", label: "Noon" },
-    slot_14_16: { range: "2 PM – 4 PM", label: "Afternoon" },
-    slot_16_18: { range: "4 PM – 6 PM", label: "Evening" },
-    slot_18_20: { range: "6 PM – 8 PM", label: "Late Evening" },
-};
+interface PickupImage {
+    url: string;
+    name?: string;
+}
 
-const STATUS_META: Record<string, { label: string; chip: string; dot: string }> = {
-    pending: { label: "Pending", chip: "border-[#D1CDBC] bg-[#F7F5F0] text-[#596155]", dot: "bg-[#596155]" },
-    confirmed: { label: "Confirmed", chip: "border-[#284226]/30 bg-[#284226]/10 text-[#284226]", dot: "bg-[#284226]" },
-    assigned: { label: "Assigned", chip: "border-[#284226]/30 bg-[#284226]/10 text-[#284226]", dot: "bg-[#284226]" },
-    en_route: { label: "On the way", chip: "border-[#C45B38]/30 bg-[#C45B38]/10 text-[#C45B38]", dot: "bg-[#C45B38]" },
-    arrived: { label: "Arrived", chip: "border-[#C45B38]/30 bg-[#C45B38]/10 text-[#C45B38]", dot: "bg-[#C45B38]" },
-    collected: { label: "Collected", chip: "border-[#284226]/30 bg-[#284226]/10 text-[#284226]", dot: "bg-[#284226]" },
-    completed: { label: "Completed", chip: "border-[#D1CDBC] bg-[#EDE9DC] text-[#121710]", dot: "bg-[#121710]" },
-    cancelled: { label: "Cancelled", chip: "border-[#D1CDBC] bg-[#F7F5F0] text-[#596155]", dot: "bg-[#596155]" },
-};
+interface Pickup {
+    id: string;
+    date: string;
+    createdAt: string;
+    status: string;
+    addressId: string;
+    slotId: string;
+    notes?: string;
+    images?: PickupImage[];
+    fee: number;
+    discount: number;
+    couponCode?: string;
+    kgPicked?: number;
+    co2Saved?: number;
+}
+
+interface PageProps {
+    params: { id: string };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const findAddress = (id: string): Address | undefined =>
+    (savedAddresses as Address[]).find((a) => a.id === id);
+
+const findSlot = (id: string): TimeSlot | undefined =>
+    (timeSlots as TimeSlot[]).find((s) => s.id === id);
 
 // ─── StatusChip ───────────────────────────────────────────────────────────────
 
-const StatusChip = ({ status }: { status: string }) => {
-    const meta = STATUS_META[status] ?? STATUS_META.pending;
+interface StatusChipProps {
+    status: string;
+}
+
+const StatusChip = ({ status }: StatusChipProps) => {
+    const meta = STATUS_META[status] ?? STATUS_META.scheduled;
     return (
         <span
             data-testid={`details-status-${status}`}
@@ -105,128 +108,17 @@ const Field = ({ icon: Icon, label, children, testId }: FieldProps) => (
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-const PickupDetails = () => {
-    const params = useParams<{ id: string }>();
-    const router = useRouter();
-    const supabase = createClient();
+const PickupDetails = ({ params }: PageProps) => {
+    const { id } = params;
+    const pickup = findPickupById(id) as Pickup | undefined;
 
-    const [user, setUser] = useState<SupabaseUser | null>(null);
-    const [pickup, setPickup] = useState<Pickup | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [notFoundFlag, setNotFoundFlag] = useState(false);
-    const [cancelling, setCancelling] = useState(false);
+    if (!pickup) notFound();
 
-    // ── Auth ─────────────────────────────────────────────────────────────────
-    useEffect(() => {
-        supabase.auth.getUser().then(({ data }) => {
-            if (!data.user) {
-                router.replace("/login");
-                return;
-            }
-            setUser(data.user);
-        });
-    }, []);
-
-    // ── Fetch the pickup, joined with address + payments ──────────────────────
-    const fetchPickup = useCallback(async () => {
-        if (!user || !params.id) return;
-        setLoading(true);
-
-        const { data, error } = await supabase
-            .from("pickups")
-            .select(
-                `
-                id,
-                pickup_id,
-                status,
-                scheduled_date,
-                scheduled_slot,
-                notes,
-                image_urls,
-                total_amount,
-                picked_up_at,
-                created_at,
-                updated_at,
-                cancellation_reason,
-                address:addresses ( id, label, address_line1, city, pincode ),
-                payments ( amount, status, method, metadata )
-                `
-            )
-            .eq("pickup_id", params.id)
-            .eq("customer_id", user.id)
-            .maybeSingle<Pickup>();
-
-        if (error) {
-            console.error("Failed to fetch pickup:", error);
-            setNotFoundFlag(true);
-        } else if (!data) {
-            setNotFoundFlag(true);
-        } else {
-            setPickup(data);
-        }
-        setLoading(false);
-    }, [user?.id, params.id]);
-
-    useEffect(() => {
-        fetchPickup();
-    }, [fetchPickup]);
-
-    // ── Cancel ───────────────────────────────────────────────────────────────
-    const cancelPickup = async () => {
-        if (!pickup || !user) return;
-        setCancelling(true);
-
-        const { error } = await supabase
-            .from("pickups")
-            .update({
-                status: "cancelled",
-                cancelled_by: user.id,
-                cancellation_reason: "Cancelled by customer",
-                updated_at: new Date().toISOString(),
-            })
-            .eq("id", pickup.id)
-            .eq("customer_id", user.id);
-
-        if (error) {
-            console.error("Failed to cancel pickup:", error);
-        } else {
-            setPickup((p) => (p ? { ...p, status: "cancelled" } : p));
-        }
-        setCancelling(false);
-    };
-
-    // ── Render states ───────────────────────────────────────────────────────
-    if (notFoundFlag) notFound();
-
-    if (loading || !pickup) {
-        return (
-            <div className="px-5 sm:px-10 lg:px-14 py-8 lg:py-12">
-                <div className="h-5 w-28 rounded-sm bg-[#EDE9DC] animate-pulse mb-6" />
-                <div className="h-12 w-72 rounded-sm bg-[#EDE9DC] animate-pulse mb-4" />
-                <div className="h-6 w-96 rounded-sm bg-[#EDE9DC] animate-pulse" />
-                <div className="mt-10 grid gap-6 lg:grid-cols-12">
-                    <div className="lg:col-span-8 space-y-6">
-                        <div className="h-48 rounded-sm bg-[#EDE9DC] animate-pulse" />
-                        <div className="h-40 rounded-sm bg-[#EDE9DC] animate-pulse" />
-                    </div>
-                    <div className="lg:col-span-4">
-                        <div className="h-72 rounded-sm bg-[#EDE9DC] animate-pulse" />
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    const slot = pickup.scheduled_slot ? SLOT_RANGES[pickup.scheduled_slot] : undefined;
-    const d = parseISO(pickup.scheduled_date);
-    const created = parseISO(pickup.created_at);
-
-    const payment = pickup.payments?.[0];
-    const discount = payment?.metadata?.discount ?? 0;
-    const couponCode = payment?.metadata?.coupon_code;
-    const total = Math.max(0, (pickup.total_amount ?? 0) - discount);
-
-    const canModify = pickup.status === "pending" || pickup.status === "confirmed";
+    const addr = findAddress(pickup.addressId);
+    const slot = findSlot(pickup.slotId);
+    const d = parseISO(pickup.date);
+    const created = parseISO(pickup.createdAt);
+    const total = Math.max(0, (pickup.fee ?? 0) - (pickup.discount ?? 0));
 
     return (
         <div
@@ -248,7 +140,7 @@ const PickupDetails = () => {
                         className="font-mono-label text-xs text-[#596155]"
                         data-testid="details-booking-id-label"
                     >
-                        [ booking · {pickup.pickup_id} ]
+                        [ booking · {pickup.id} ]
                     </p>
                     <h1 className="mt-3 font-display font-black tracking-tighter text-4xl sm:text-5xl text-[#121710]">
                         Pickup detail
@@ -312,12 +204,11 @@ const PickupDetails = () => {
                                 label="Pickup address"
                                 testId="details-field-address"
                             >
-                                {pickup.address ? (
+                                {addr ? (
                                     <>
-                                        <p className="font-medium">{pickup.address.label}</p>
+                                        <p className="font-medium">{addr.label}</p>
                                         <p className="text-sm text-[#596155] mt-0.5">
-                                            {pickup.address.address_line1}, {pickup.address.city} —{" "}
-                                            {pickup.address.pincode}
+                                            {addr.line1}, {addr.city} — {addr.pincode}
                                         </p>
                                     </>
                                 ) : (
@@ -373,22 +264,22 @@ const PickupDetails = () => {
                                 04 · Pictures
                             </p>
                             <p className="font-mono-label text-[10px] text-[#596155]">
-                                {pickup.image_urls?.length ?? 0} attached
+                                {pickup.images?.length ?? 0} attached
                             </p>
                         </div>
-                        {pickup.image_urls && pickup.image_urls.length > 0 ? (
+                        {pickup.images && pickup.images.length > 0 ? (
                             <div
                                 className="grid grid-cols-2 sm:grid-cols-3 gap-3"
                                 data-testid="details-images-grid"
                             >
-                                {pickup.image_urls.map((url, i) => (
+                                {pickup.images.map((img, i) => (
                                     <div
-                                        key={url}
+                                        key={i}
                                         className="overflow-hidden rounded-sm border border-[#D1CDBC]"
                                     >
                                         <img
-                                            src={url}
-                                            alt={`Pickup ${i + 1}`}
+                                            src={img.url}
+                                            alt={img.name ?? `Pickup ${i + 1}`}
                                             className="h-32 w-full object-cover"
                                         />
                                     </div>
@@ -404,6 +295,37 @@ const PickupDetails = () => {
                             </div>
                         )}
                     </section>
+
+                    {/* Impact (if completed) */}
+                    {pickup.status === "completed" &&
+                        (pickup.kgPicked ?? pickup.co2Saved) && (
+                            <section
+                                data-testid="details-section-impact"
+                                className="rounded-sm border border-[#D1CDBC] bg-[#171A15] text-[#F7F5F0] p-6 sm:p-8"
+                            >
+                                <p className="font-mono-label text-xs text-[#F7F5F0]/60">
+                                    05 · Impact
+                                </p>
+                                <div className="mt-5 grid grid-cols-2 gap-6">
+                                    <div>
+                                        <p className="font-display text-4xl font-black tracking-tighter">
+                                            {pickup.kgPicked} kg
+                                        </p>
+                                        <p className="mt-2 text-xs text-[#F7F5F0]/60">
+                                            Diverted from landfill
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p className="font-display text-4xl font-black tracking-tighter">
+                                            {pickup.co2Saved} kg
+                                        </p>
+                                        <p className="mt-2 text-xs text-[#F7F5F0]/60">
+                                            CO₂e saved via recycling
+                                        </p>
+                                    </div>
+                                </div>
+                            </section>
+                        )}
                 </div>
 
                 {/* Right summary */}
@@ -414,25 +336,25 @@ const PickupDetails = () => {
                             className="mt-3 font-display text-2xl font-bold tracking-tight text-[#121710]"
                             data-testid="details-summary-id"
                         >
-                            {pickup.pickup_id}
+                            {pickup.id}
                         </p>
 
                         <dl className="mt-6 space-y-4 text-sm">
                             <div className="flex justify-between">
                                 <dt className="text-[#596155]">Pickup fee</dt>
-                                <dd className="text-[#121710]">₹{pickup.total_amount}</dd>
+                                <dd className="text-[#121710]">₹{pickup.fee}</dd>
                             </div>
-                            {discount > 0 && (
+                            {pickup.discount > 0 && (
                                 <div className="flex justify-between">
                                     <dt className="text-[#596155]">
                                         Discount{" "}
-                                        {couponCode && (
+                                        {pickup.couponCode && (
                                             <span className="font-mono-label text-[10px] text-[#C45B38]">
-                                                {couponCode}
+                                                {pickup.couponCode}
                                             </span>
                                         )}
                                     </dt>
-                                    <dd className="text-[#C45B38]">− ₹{discount}</dd>
+                                    <dd className="text-[#C45B38]">− ₹{pickup.discount}</dd>
                                 </div>
                             )}
                         </dl>
@@ -452,7 +374,8 @@ const PickupDetails = () => {
                             <p className="text-xs text-[#596155]">GST included</p>
                         </div>
 
-                        {canModify && (
+                        {(pickup.status === "scheduled" ||
+                            pickup.status === "in_progress") && (
                             <div className="mt-7 space-y-2">
                                 <button
                                     type="button"
@@ -463,12 +386,9 @@ const PickupDetails = () => {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={cancelPickup}
-                                    disabled={cancelling}
                                     data-testid="details-cancel-btn"
-                                    className="w-full inline-flex items-center justify-center gap-2 rounded-sm bg-[#C45B38]/10 border border-[#C45B38]/40 px-4 py-3 text-sm font-medium text-[#C45B38] hover:bg-[#C45B38] hover:text-[#F7F5F0] transition-colors disabled:opacity-60"
+                                    className="w-full rounded-sm bg-[#C45B38]/10 border border-[#C45B38]/40 px-4 py-3 text-sm font-medium text-[#C45B38] hover:bg-[#C45B38] hover:text-[#F7F5F0] transition-colors"
                                 >
-                                    {cancelling && <Loader2 size={14} className="animate-spin" />}
                                     Cancel pickup
                                 </button>
                             </div>

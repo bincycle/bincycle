@@ -1,17 +1,143 @@
-import { Check, CircleDashed, Truck, Recycle, X } from "lucide-react";
+import { Check, CircleDashed, Truck, Recycle, X, type LucideIcon } from "lucide-react";
 import { format, parseISO } from "date-fns";
-import { getPickupTimeline } from "@workspace/data/mockPickups";
 
-const ICONS = {
-    scheduled: Check,
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface PickupForTimeline {
+    status: string;
+    created_at: string;
+    scheduled_date: string;
+    picked_up_at: string | null;
+    updated_at: string;
+    cancellation_reason?: string | null;
+}
+
+type StepState = "done" | "current" | "upcoming" | "cancelled";
+
+interface TimelineStep {
+    key: string;
+    label: string;
+    description: string;
+    state: StepState;
+    at: string | null;
+}
+
+interface PickupTimelineProps {
+    pickup: PickupForTimeline;
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const ICONS: Record<string, LucideIcon> = {
     confirmed: Check,
-    driver_assigned: Truck,
-    in_progress: Truck,
+    assigned: Truck,
+    en_route: Truck,
+    arrived: Truck,
+    collected: Truck,
     completed: Recycle,
     cancelled: X,
 };
 
-const stateClasses = (state) => {
+// Linear progression through the pickups.status check constraint, minus the
+// terminal branch (cancelled can happen from any state).
+const STATUS_ORDER = [
+    "pending",
+    "confirmed",
+    "assigned",
+    "en_route",
+    "arrived",
+    "collected",
+    "completed",
+] as const;
+
+const STEP_COPY: Record<string, { label: string; description: string }> = {
+    pending: {
+        label: "Booking received",
+        description: "We've got your request and are lining up a partner.",
+    },
+    confirmed: {
+        label: "Confirmed",
+        description: "Your slot is locked in.",
+    },
+    assigned: {
+        label: "Partner assigned",
+        description: "A pickup partner has been assigned to your booking.",
+    },
+    en_route: {
+        label: "On the way",
+        description: "Your partner is heading to the pickup address.",
+    },
+    arrived: {
+        label: "Arrived",
+        description: "Your partner has reached your address.",
+    },
+    collected: {
+        label: "Collected",
+        description: "Items picked up and on the way to processing.",
+    },
+    completed: {
+        label: "Completed",
+        description: "Pickup wrapped up. Thanks for recycling with us.",
+    },
+};
+
+// ─── Derive timeline steps from real pickup data ─────────────────────────────
+// There's no separate timeline/events table — we infer progress from
+// `status`, falling back to `updated_at` / `picked_up_at` / `created_at`
+// for the "at" timestamp shown on each step.
+
+const getPickupTimeline = (pickup: PickupForTimeline): TimelineStep[] => {
+    if (pickup.status === "cancelled") {
+        return [
+            {
+                key: "pending",
+                label: STEP_COPY.pending.label,
+                description: STEP_COPY.pending.description,
+                state: "done",
+                at: pickup.created_at,
+            },
+            {
+                key: "cancelled",
+                label: "Cancelled",
+                description:
+                    pickup.cancellation_reason || "This pickup was cancelled.",
+                state: "cancelled",
+                at: pickup.updated_at,
+            },
+        ];
+    }
+
+    const currentIdx = STATUS_ORDER.indexOf(
+        pickup.status as (typeof STATUS_ORDER)[number]
+    );
+    // Unknown status — treat as just-started rather than crashing
+    const safeIdx = currentIdx === -1 ? 0 : currentIdx;
+
+    return STATUS_ORDER.map((key, idx) => {
+        let state: StepState = "upcoming";
+        if (idx < safeIdx) state = "done";
+        else if (idx === safeIdx) state = "current";
+
+        // Best-effort timestamp per step — only the first and current/collected
+        // steps have a reliable source column; the rest are left blank.
+        let at: string | null = null;
+        if (key === "pending") at = pickup.created_at;
+        else if (key === "collected" && pickup.picked_up_at) at = pickup.picked_up_at;
+        else if (state === "current" || state === "done") at = pickup.updated_at;
+
+        return {
+            key,
+            label: STEP_COPY[key].label,
+            description: STEP_COPY[key].description,
+            state,
+            at,
+        };
+    });
+};
+
+// ─── Visual state → class mapping ────────────────────────────────────────────
+
+const stateClasses = (state: StepState) => {
     if (state === "done")
         return {
             dot: "bg-[#284226] text-[#F7F5F0]",
@@ -41,15 +167,14 @@ const stateClasses = (state) => {
     };
 };
 
-export const PickupTimeline = ({ pickup }) => {
+// ─── PickupTimeline ───────────────────────────────────────────────────────────
+
+export const PickupTimeline = ({ pickup }: PickupTimelineProps) => {
     const steps = getPickupTimeline(pickup);
     if (!steps.length) return null;
 
     return (
-        <ol
-            data-testid="pickup-timeline"
-            className="relative space-y-0"
-        >
+        <ol data-testid="pickup-timeline" className="relative space-y-0">
             {steps.map((step, idx) => {
                 const Icon =
                     step.state === "upcoming"
@@ -88,13 +213,8 @@ export const PickupTimeline = ({ pickup }) => {
                                     {step.label}
                                 </p>
                                 {step.at && (
-                                    <p
-                                        className={`font-mono-label text-[10px] ${c.time}`}
-                                    >
-                                        {format(
-                                            parseISO(step.at),
-                                            "d MMM · HH:mm"
-                                        )}
+                                    <p className={`font-mono-label text-[10px] ${c.time}`}>
+                                        {format(parseISO(step.at), "d MMM · HH:mm")}
                                     </p>
                                 )}
                             </div>

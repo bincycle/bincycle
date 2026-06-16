@@ -1,31 +1,26 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
 import { ArrowRight, Calendar, Clock, MapPin, Plus } from "lucide-react";
-import { loadAllPickups, STATUS_META, isUpcoming } from "@workspace/data/mockPickups";
-import { savedAddresses, timeSlots } from "@workspace/data/mockData";
+import { createClient } from "@workspace/supabase/client";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Pickup {
     id: string;
-    date: string;
+    pickup_id: string;
+    scheduled_date: string;
     status: string;
-    addressId: string;
-    slotId: string;
-}
-
-interface Address {
-    id: string;
-    label: string;
-    city: string;
-}
-
-interface TimeSlot {
-    id: string;
-    range: string;
+    scheduled_slot: string | null;
+    address: {
+        id: string;
+        label: string | null;
+        city: string;
+    } | null;
 }
 
 type TabId = "upcoming" | "completed";
@@ -35,13 +30,63 @@ interface Tab {
     label: string;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Status metadata (kept local — purely presentational) ───────────────────
 
-const findAddress = (id: string): Address | undefined =>
-    (savedAddresses as Address[]).find((a) => a.id === id);
+const STATUS_META: Record<string, { label: string; chip: string; dot: string }> = {
+    pending: {
+        label: "Pending",
+        chip: "border-[#D1CDBC] bg-[#F7F5F0] text-[#596155]",
+        dot: "bg-[#596155]",
+    },
+    confirmed: {
+        label: "Confirmed",
+        chip: "border-[#284226]/30 bg-[#284226]/10 text-[#284226]",
+        dot: "bg-[#284226]",
+    },
+    assigned: {
+        label: "Assigned",
+        chip: "border-[#284226]/30 bg-[#284226]/10 text-[#284226]",
+        dot: "bg-[#284226]",
+    },
+    en_route: {
+        label: "On the way",
+        chip: "border-[#C45B38]/30 bg-[#C45B38]/10 text-[#C45B38]",
+        dot: "bg-[#C45B38]",
+    },
+    arrived: {
+        label: "Arrived",
+        chip: "border-[#C45B38]/30 bg-[#C45B38]/10 text-[#C45B38]",
+        dot: "bg-[#C45B38]",
+    },
+    collected: {
+        label: "Collected",
+        chip: "border-[#284226]/30 bg-[#284226]/10 text-[#284226]",
+        dot: "bg-[#284226]",
+    },
+    completed: {
+        label: "Completed",
+        chip: "border-[#D1CDBC] bg-[#EDE9DC] text-[#121710]",
+        dot: "bg-[#121710]",
+    },
+    cancelled: {
+        label: "Cancelled",
+        chip: "border-[#D1CDBC] bg-[#F7F5F0] text-[#596155]",
+        dot: "bg-[#596155]",
+    },
+};
 
-const findSlot = (id: string): TimeSlot | undefined =>
-    (timeSlots as TimeSlot[]).find((s) => s.id === id);
+const TERMINAL_STATUSES = new Set(["completed", "cancelled"]);
+const isUpcoming = (p: Pickup) => !TERMINAL_STATUSES.has(p.status);
+
+// Static slot label lookup — slot IDs map to fixed ranges set in the booking flow
+const SLOT_RANGES: Record<string, string> = {
+    slot_8_10: "8 AM – 10 AM",
+    slot_10_12: "10 AM – 12 PM",
+    slot_12_14: "12 PM – 2 PM",
+    slot_14_16: "2 PM – 4 PM",
+    slot_16_18: "4 PM – 6 PM",
+    slot_18_20: "6 PM – 8 PM",
+};
 
 // ─── StatusBadge ──────────────────────────────────────────────────────────────
 
@@ -50,7 +95,7 @@ interface StatusBadgeProps {
 }
 
 const StatusBadge = ({ status }: StatusBadgeProps) => {
-    const meta = STATUS_META[status] ?? STATUS_META.scheduled;
+    const meta = STATUS_META[status] ?? STATUS_META.pending;
     return (
         <span
             data-testid={`status-badge-${status}`}
@@ -69,19 +114,18 @@ interface PickupRowProps {
 }
 
 const PickupRow = ({ p }: PickupRowProps) => {
-    const addr = findAddress(p.addressId);
-    const slot = findSlot(p.slotId);
-    const d = parseISO(p.date);
+    const d = parseISO(p.scheduled_date);
+    const slotRange = p.scheduled_slot ? SLOT_RANGES[p.scheduled_slot] : undefined;
     return (
         <Link
-            href={`/pickups/${p.id}`}
-            data-testid={`pickup-row-${p.id}`}
+            href={`/pickups/${p.pickup_id}`}
+            data-testid={`pickup-row-${p.pickup_id}`}
             className="group grid grid-cols-12 items-center gap-4 rounded-sm border border-[#D1CDBC] bg-white p-5 transition-all hover:-translate-y-0.5 hover:border-[#284226]"
         >
             <div className="col-span-12 sm:col-span-3 flex flex-col gap-2">
                 <p className="font-mono-label text-[10px] text-[#596155]">Booking</p>
                 <p className="font-display text-lg font-bold tracking-tight text-[#121710]">
-                    {p.id}
+                    {p.pickup_id}
                 </p>
                 <StatusBadge status={p.status} />
             </div>
@@ -98,7 +142,7 @@ const PickupRow = ({ p }: PickupRowProps) => {
                 <Clock size={14} className="text-[#596155] mt-0.5 shrink-0" />
                 <div>
                     <p className="font-mono-label text-[10px] text-[#596155]">Slot</p>
-                    <p className="text-sm text-[#121710] mt-1">{slot?.range ?? "—"}</p>
+                    <p className="text-sm text-[#121710] mt-1">{slotRange ?? "—"}</p>
                 </div>
             </div>
             <div className="col-span-6 sm:col-span-3 flex items-start gap-2">
@@ -106,8 +150,8 @@ const PickupRow = ({ p }: PickupRowProps) => {
                 <div className="min-w-0">
                     <p className="font-mono-label text-[10px] text-[#596155]">Address</p>
                     <p className="truncate text-sm text-[#121710] mt-1">
-                        {addr?.label ?? "—"} ·{" "}
-                        <span className="text-[#596155]">{addr?.city ?? ""}</span>
+                        {p.address?.label ?? "—"} ·{" "}
+                        <span className="text-[#596155]">{p.address?.city ?? ""}</span>
                     </p>
                 </div>
             </div>
@@ -124,6 +168,21 @@ const PickupRow = ({ p }: PickupRowProps) => {
     );
 };
 
+// ─── Skeleton row ─────────────────────────────────────────────────────────────
+
+const PickupRowSkeleton = () => (
+    <div className="grid grid-cols-12 items-center gap-4 rounded-sm border border-[#D1CDBC] bg-white p-5">
+        <div className="col-span-12 sm:col-span-3 space-y-2">
+            <div className="h-3 w-14 rounded-sm bg-[#EDE9DC] animate-pulse" />
+            <div className="h-5 w-24 rounded-sm bg-[#EDE9DC] animate-pulse" />
+        </div>
+        <div className="col-span-12 sm:col-span-3 h-8 rounded-sm bg-[#EDE9DC] animate-pulse" />
+        <div className="col-span-6 sm:col-span-2 h-8 rounded-sm bg-[#EDE9DC] animate-pulse" />
+        <div className="col-span-6 sm:col-span-3 h-8 rounded-sm bg-[#EDE9DC] animate-pulse" />
+        <div className="col-span-12 sm:col-span-1" />
+    </div>
+);
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TABS: Tab[] = [
@@ -134,8 +193,57 @@ const TABS: Tab[] = [
 // ─── Pickups page ─────────────────────────────────────────────────────────────
 
 const Pickups = () => {
-    const all = useMemo(() => loadAllPickups() as Pickup[], []);
+    const router = useRouter();
+    const supabase = createClient();
+
+    const [user, setUser] = useState<SupabaseUser | null>(null);
+    const [all, setAll] = useState<Pickup[]>([]);
+    const [loading, setLoading] = useState(true);
     const [tab, setTab] = useState<TabId>("upcoming");
+
+    // ── Auth ─────────────────────────────────────────────────────────────────
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data }) => {
+            if (!data.user) {
+                router.replace("/login");
+                return;
+            }
+            setUser(data.user);
+        });
+    }, []);
+
+    // ── Fetch pickups + joined address ──────────────────────────────────────
+    const fetchPickups = useCallback(async () => {
+        if (!user) return;
+        setLoading(true);
+
+        const { data, error } = await supabase
+            .from("pickups")
+            .select(
+                `
+                id,
+                pickup_id,
+                scheduled_date,
+                scheduled_slot,
+                status,
+                address:addresses ( id, label, city )
+                `
+            )
+            .eq("customer_id", user.id)
+            .order("scheduled_date", { ascending: false })
+            .returns<Pickup[]>();
+
+        if (error) {
+            console.error("Failed to fetch pickups:", error);
+        } else {
+            setAll(data ?? []);
+        }
+        setLoading(false);
+    }, [user?.id]);
+
+    useEffect(() => {
+        fetchPickups();
+    }, [fetchPickups]);
 
     const list = useMemo(() => {
         if (tab === "upcoming") return all.filter(isUpcoming);
@@ -213,7 +321,13 @@ const Pickups = () => {
 
             {/* List */}
             <div className="mt-6 space-y-3" data-testid="pickups-list">
-                {list.length === 0 ? (
+                {loading ? (
+                    <>
+                        <PickupRowSkeleton />
+                        <PickupRowSkeleton />
+                        <PickupRowSkeleton />
+                    </>
+                ) : list.length === 0 ? (
                     <div
                         data-testid="pickups-empty"
                         className="rounded-sm border border-dashed border-[#D1CDBC] bg-white p-10 text-center"
@@ -238,7 +352,7 @@ const Pickups = () => {
                         )}
                     </div>
                 ) : (
-                    list.map((p) => <PickupRow key={p.id} p={p} />)
+                    list.map((p) => <PickupRow key={p.pickup_id} p={p} />)
                 )}
             </div>
         </div>
