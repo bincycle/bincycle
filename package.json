@@ -7,6 +7,7 @@
     "dev": "turbo dev",
     "dev:web": "turbo run dev --filter=@bincycle/web",
     "dev:customer": "turbo run dev --filter=@bincycle/customer",
+    "dev:admin": "turbo run dev --filter=@bincycle/admin",
     "lint": "turbo lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
   },
