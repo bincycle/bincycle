@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Search, X } from "lucide-react";
 import { format, parseISO } from "date-fns";
@@ -17,7 +17,13 @@ import {
     StatusChip,
     EmptyState,
 } from "@/components/AdminUI";
-import { createClient } from "@/lib/supabase/client";
+import {
+    loadEnrichedPickups,
+    loadExecutives,
+    loadCustomers,
+    STATUS_ORDER,
+    ADMIN_STATUS,
+} from "@workspace/data/adminMock";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,58 +34,15 @@ interface DateRange {
     label: string;
 }
 
-interface Pickup {
-    id: string;
-    pickup_id: string;
-    status: string;
-    scheduled_date: string;
-    scheduled_slot: string | null;
-    total_amount: number;
-    customer?: { full_name: string; email: string };
-    executive?: { full_name: string; id: string };
-}
-
-interface Executive {
-    id: string;
-    full_name: string;
-}
-
-interface Customer {
-    id: string;
-    full_name: string;
-}
-
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const dateRanges: DateRange[] = [
-    { id: "any", label: "Any date" },
+    { id: "any",   label: "Any date" },
     { id: "today", label: "Today" },
-    { id: "week", label: "This week" },
+    { id: "week",  label: "This week" },
     { id: "month", label: "This month" },
-    { id: "past", label: "Past 30 days" },
+    { id: "past",  label: "Past 30 days" },
 ];
-
-const STATUS_OPTIONS = [
-    "pending",
-    "confirmed",
-    "assigned",
-    "en_route",
-    "arrived",
-    "collected",
-    "completed",
-    "cancelled",
-];
-
-const STATUS_LABELS: Record<string, string> = {
-    pending: "Pending",
-    confirmed: "Confirmed",
-    assigned: "Assigned",
-    en_route: "En route",
-    arrived: "Arrived",
-    collected: "Collected",
-    completed: "Completed",
-    cancelled: "Cancelled",
-};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -117,104 +80,41 @@ const inRange = (iso: string, key: DateRangeKey): boolean => {
     return true;
 };
 
-// ─── Admin Pickups page ────────────────────────────────────────────────────────
+// ─── Page component ───────────────────────────────────────────────────────────
 
+/**
+ * Place this file at:  app/admin/pickups/page.tsx
+ *
+ * This is a Client Component ("use client") because it manages filter state
+ * locally. If you later want URL-driven filters (shareable links, back-button
+ * support), replace useState with useSearchParams + router.replace().
+ */
 const AdminPickups = () => {
-    const supabase = createClient();
-
     const [q, setQ] = useState("");
     const [status, setStatus] = useState("all");
     const [dateKey, setDateKey] = useState<DateRangeKey>("any");
     const [execFilter, setExecFilter] = useState("all");
     const [custFilter, setCustFilter] = useState("all");
 
-    const [pickups, setPickups] = useState<Pickup[]>([]);
-    const [executives, setExecutives] = useState<Executive[]>([]);
-    const [customers, setCustomers] = useState<Customer[]>([]);
-    const [loading, setLoading] = useState(true);
+    const pickups = useMemo(() => loadEnrichedPickups(), []);
+    const execs = useMemo(() => loadExecutives(), []);
+    const customers = useMemo(() => loadCustomers(), []);
 
-    // ── Fetch all data ─────────────────────────────────────────────────────
-    const fetchData = useCallback(async () => {
-        setLoading(true);
-
-        try {
-            const [
-                { data: pickupsData },
-                { data: exeData },
-                { data: custData },
-            ] = await Promise.all([
-                // Pickups with customer and executive joined
-                supabase
-                    .from("pickups")
-                    .select(
-                        `
-                        id,
-                        pickup_id,
-                        status,
-                        scheduled_date,
-                        scheduled_slot,
-                        total_amount,
-                        customer:profiles!customer_id ( full_name, email ),
-                        executive:profiles!executive_id ( full_name, id )
-                        `
-                    )
-                    .order("created_at", { ascending: false }),
-                // All executives
-                supabase
-                    .from("profiles")
-                    .select("id, full_name")
-                    .eq("role", "executive")
-                    .order("full_name", { ascending: true }),
-                // All customers
-                supabase
-                    .from("profiles")
-                    .select("id, full_name")
-                    .eq("role", "customer")
-                    .order("full_name", { ascending: true }),
-            ]);
-
-            // Normalize nested arrays from joins to single objects
-            const normalized = (pickupsData ?? []).map((p) => ({
-                ...p,
-                customer: Array.isArray(p.customer)
-                    ? p.customer[0]
-                    : p.customer,
-                executive: Array.isArray(p.executive)
-                    ? p.executive[0]
-                    : p.executive,
-            }));
-
-            setPickups(normalized);
-            setExecutives(exeData ?? []);
-            setCustomers(custData ?? []);
-        } catch (err) {
-            console.error("Failed to fetch pickups data:", err);
-        }
-
-        setLoading(false);
-    }, []);
-
-    useEffect(() => {
-        fetchData();
-    }, [fetchData]);
-
-    // ── Filter logic ───────────────────────────────────────────────────────
     const filtered = useMemo(() => {
         const qq = q.trim().toLowerCase();
         return pickups.filter((p) => {
             if (status !== "all" && p.status !== status) return false;
-            if (execFilter !== "all" && p.executive?.id !== execFilter)
-                return false;
-            if (custFilter !== "all" && p.customer?.email !== custFilter)
-                return false;
-            if (!inRange(p.scheduled_date, dateKey)) return false;
+            if (execFilter !== "all" && p.executiveId !== execFilter) return false;
+            if (custFilter !== "all" && p.customerId !== custFilter) return false;
+            if (!inRange(p.date, dateKey)) return false;
             if (qq) {
                 const blob = [
-                    p.pickup_id,
-                    p.customer?.full_name,
+                    p.id,
+                    p.customer?.name,
                     p.customer?.email,
-                    p.executive?.full_name,
-                    p.executive?.id,
+                    p.executive?.name,
+                    p.executive?.empId,
+                    p.address?.city,
                 ]
                     .filter(Boolean)
                     .join(" ")
@@ -239,25 +139,6 @@ const AdminPickups = () => {
         dateKey !== "any" ||
         execFilter !== "all" ||
         custFilter !== "all";
-
-    if (loading) {
-        return (
-            <div
-                data-testid="admin-pickups-page"
-                className="px-5 sm:px-8 lg:px-10 py-8 lg:py-10"
-            >
-                <AdminPageHeader
-                    eyebrow="[ admin · pickups ]"
-                    title="All pickups"
-                    description="Search, filter and drill into every booking across the network."
-                />
-                <div className="mt-6 space-y-3">
-                    <div className="h-10 rounded-sm bg-[#EDE9DC] animate-pulse" />
-                    <div className="h-64 rounded-sm bg-[#EDE9DC] animate-pulse" />
-                </div>
-            </div>
-        );
-    }
 
     return (
         <div
@@ -286,7 +167,7 @@ const AdminPickups = () => {
                             value={q}
                             onChange={(e) => setQ(e.target.value)}
                             data-testid="pickups-search"
-                            placeholder="Search by ID, customer, executive"
+                            placeholder="Search by ID, customer, executive, city"
                             className="h-10 pl-9 rounded-sm border-[#D1CDBC] focus-visible:ring-[#284226]"
                         />
                     </div>
@@ -302,9 +183,9 @@ const AdminPickups = () => {
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">All status</SelectItem>
-                                {STATUS_OPTIONS.map((s) => (
+                                {STATUS_ORDER.map((s: string) => (
                                     <SelectItem key={s} value={s}>
-                                        {STATUS_LABELS[s] || s}
+                                        {ADMIN_STATUS[s].label}
                                     </SelectItem>
                                 ))}
                             </SelectContent>
@@ -315,9 +196,7 @@ const AdminPickups = () => {
                     <div className="lg:col-span-2">
                         <Select
                             value={dateKey}
-                            onValueChange={(v) =>
-                                setDateKey(v as DateRangeKey)
-                            }
+                            onValueChange={(v) => setDateKey(v as DateRangeKey)}
                         >
                             <SelectTrigger
                                 data-testid="pickups-filter-date"
@@ -326,9 +205,9 @@ const AdminPickups = () => {
                                 <SelectValue placeholder="Date" />
                             </SelectTrigger>
                             <SelectContent>
-                                {dateRanges.map((dr) => (
-                                    <SelectItem key={dr.id} value={dr.id}>
-                                        {dr.label}
+                                {dateRanges.map((r) => (
+                                    <SelectItem key={r.id} value={r.id}>
+                                        {r.label}
                                     </SelectItem>
                                 ))}
                             </SelectContent>
@@ -346,9 +225,9 @@ const AdminPickups = () => {
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">All executives</SelectItem>
-                                {executives.map((e) => (
+                                {execs.map((e) => (
                                     <SelectItem key={e.id} value={e.id}>
-                                        {e.full_name}
+                                        {e.name} · {e.empId}
                                     </SelectItem>
                                 ))}
                             </SelectContent>
@@ -368,7 +247,7 @@ const AdminPickups = () => {
                                 <SelectItem value="all">All customers</SelectItem>
                                 {customers.map((c) => (
                                     <SelectItem key={c.id} value={c.id}>
-                                        {c.full_name}
+                                        {c.name}
                                     </SelectItem>
                                 ))}
                             </SelectContent>
@@ -426,17 +305,18 @@ const AdminPickups = () => {
                                 className="border-t border-[#D1CDBC] hover:bg-[#F7F5F0] transition-colors"
                             >
                                 <td className="px-4 py-3">
+                                    {/* Link to={...} → href={...} */}
                                     <Link
-                                        href={`/admin/pickups/${p.pickup_id}`}
-                                        data-testid={`pickup-row-${p.pickup_id}`}
+                                        href={`/admin/pickups/${p.id}`}
+                                        data-testid={`pickup-row-${p.id}`}
                                         className="font-display font-bold tracking-tight text-[#121710] hover:text-[#C45B38]"
                                     >
-                                        {p.pickup_id}
+                                        {p.id}
                                     </Link>
                                 </td>
                                 <td className="px-4 py-3 text-[#121710]">
                                     <p className="truncate max-w-[180px]">
-                                        {p.customer?.full_name ?? "—"}
+                                        {p.customer?.name ?? "—"}
                                     </p>
                                     <p className="text-xs text-[#596155] truncate max-w-[180px]">
                                         {p.customer?.email}
@@ -444,9 +324,14 @@ const AdminPickups = () => {
                                 </td>
                                 <td className="px-4 py-3 text-[#121710]">
                                     {p.executive ? (
-                                        <p className="truncate max-w-[160px]">
-                                            {p.executive.full_name}
-                                        </p>
+                                        <>
+                                            <p className="truncate max-w-[160px]">
+                                                {p.executive.name}
+                                            </p>
+                                            <p className="text-xs text-[#596155]">
+                                                {p.executive.empId}
+                                            </p>
+                                        </>
                                     ) : (
                                         <span className="font-mono-label text-[10px] text-[#596155]">
                                             UNASSIGNED
@@ -454,16 +339,14 @@ const AdminPickups = () => {
                                     )}
                                 </td>
                                 <td className="px-4 py-3 text-[#121710]">
-                                    <p>{format(parseISO(p.scheduled_date), "d MMM yy")}</p>
-                                    <p className="text-xs text-[#596155]">
-                                        {p.scheduled_slot || "—"}
-                                    </p>
+                                    <p>{format(parseISO(p.date), "d MMM yy")}</p>
+                                    <p className="text-xs text-[#596155]">{p.slot}</p>
                                 </td>
                                 <td className="px-4 py-3">
                                     <StatusChip status={p.status} />
                                 </td>
                                 <td className="px-4 py-3 text-right font-display font-bold tracking-tight">
-                                    ₹{p.total_amount}
+                                    ₹{p.amount}
                                 </td>
                             </tr>
                         ))}
@@ -486,28 +369,27 @@ const AdminPickups = () => {
                 {filtered.map((p) => (
                     <li key={p.id}>
                         <Link
-                            href={`/admin/pickups/${p.pickup_id}`}
-                            data-testid={`pickup-card-${p.pickup_id}`}
+                            href={`/admin/pickups/${p.id}`}
+                            data-testid={`pickup-card-${p.id}`}
                             className="block rounded-sm border border-[#D1CDBC] bg-white p-4"
                         >
                             <div className="flex items-center justify-between gap-2 mb-2">
                                 <p className="font-display font-bold tracking-tight text-[#121710]">
-                                    {p.pickup_id}
+                                    {p.id}
                                 </p>
                                 <StatusChip status={p.status} />
                             </div>
                             <p className="text-sm text-[#121710]">
-                                {p.customer?.full_name}
+                                {p.customer?.name}
                             </p>
                             <p className="text-xs text-[#596155]">
                                 {p.executive
-                                    ? p.executive.full_name
+                                    ? `${p.executive.name} · ${p.executive.empId}`
                                     : "Unassigned"}{" "}
-                                · {format(parseISO(p.scheduled_date), "d MMM")} ·{" "}
-                                {p.scheduled_slot || "—"}
+                                · {format(parseISO(p.date), "d MMM")} · {p.slot}
                             </p>
                             <p className="mt-2 font-display font-bold tracking-tight text-[#121710]">
-                                ₹{p.total_amount}
+                                ₹{p.amount}
                             </p>
                         </Link>
                     </li>

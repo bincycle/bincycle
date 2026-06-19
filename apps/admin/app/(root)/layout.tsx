@@ -159,11 +159,11 @@ export const AdminLayout = ({ children }: AdminLayoutProps) => {
         setSheetOpen(false);
     }, [pathname]);
 
-    useEffect(() => {
-        if (!auth) router.replace("/admin/login");
-    }, [auth, router]);
+    // useEffect(() => {
+        // if (!auth) router.replace("/admin/login");
+    // }, [auth, router]);
 
-    if (!auth) return null;
+    // if (!auth) return null;
 
     return (
         <div className="min-h-screen bg-[#F7F5F0] text-[#121710]">
