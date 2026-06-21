@@ -427,7 +427,7 @@ const AdminPickups = () => {
                             >
                                 <td className="px-4 py-3">
                                     <Link
-                                        href={`/admin/pickups/${p.pickup_id}`}
+                                        href={`/pickups/${p.pickup_id}`}
                                         data-testid={`pickup-row-${p.pickup_id}`}
                                         className="font-display font-bold tracking-tight text-[#121710] hover:text-[#C45B38]"
                                     >
@@ -486,7 +486,7 @@ const AdminPickups = () => {
                 {filtered.map((p) => (
                     <li key={p.id}>
                         <Link
-                            href={`/admin/pickups/${p.pickup_id}`}
+                            href={`/pickups/${p.pickup_id}`}
                             data-testid={`pickup-card-${p.pickup_id}`}
                             className="block rounded-sm border border-[#D1CDBC] bg-white p-4"
                         >

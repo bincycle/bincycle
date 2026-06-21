@@ -33,7 +33,7 @@ export const AdminLogoutDialog = ({
             setPending(false);
             onOpenChange(false);
             toast.success("Signed out of the admin console.");
-            router.push("/admin/login");
+            router.push("/login");
         }, 450);
     };
 

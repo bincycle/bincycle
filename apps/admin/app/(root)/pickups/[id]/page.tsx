@@ -149,7 +149,7 @@ const AdminPickupDetails = () => {
         return (
             <div className="px-5 sm:px-8 lg:px-10 py-10">
                 <Link
-                    href="/admin/pickups"
+                    href="/pickups"
                     className="inline-flex items-center gap-2 text-sm text-[#596155] hover:text-[#121710] mb-6"
                 >
                     <ArrowLeft size={14} /> Back to pickups
@@ -259,7 +259,7 @@ const AdminPickupDetails = () => {
                     action={
                         pickup.customer && (
                             <Link
-                                href={`/admin/customers/${pickup.customer.id}`}
+                                href={`/customers/${pickup.customer.id}`}
                                 data-testid="view-customer"
                                 className="text-xs text-[#C45B38] hover:underline"
                             >
@@ -307,7 +307,7 @@ const AdminPickupDetails = () => {
                     action={
                         pickup.executive && (
                             <Link
-                                href={`/admin/executives/${pickup.executive.id}`}
+                                href={`/executives/${pickup.executive.id}`}
                                 data-testid="view-executive"
                                 className="text-xs text-[#C45B38] hover:underline"
                             >

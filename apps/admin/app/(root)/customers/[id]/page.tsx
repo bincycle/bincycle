@@ -190,7 +190,7 @@ const AdminCustomerDetails = () => {
         return (
             <div className="px-5 sm:px-8 lg:px-10 py-10">
                 <Link
-                    href="/admin/customers"
+                    href="/customers"
                     className="inline-flex items-center gap-2 text-sm text-[#596155] hover:text-[#121710] mb-6"
                 >
                     <ArrowLeft size={14} /> Back to customers
@@ -336,7 +336,7 @@ const AdminCustomerDetails = () => {
                         {pickups.map((p) => (
                             <li key={p.id}>
                                 <Link
-                                    href={`/admin/pickups/${p.pickup_id}`}
+                                    href={`/pickups/${p.pickup_id}`}
                                     data-testid={`cust-pickup-${p.pickup_id}`}
                                     className="flex items-center justify-between gap-3 rounded-sm border border-[#D1CDBC] bg-[#F7F5F0] p-3 hover:border-[#121710] transition-colors"
                                 >

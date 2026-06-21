@@ -83,7 +83,7 @@ const inRange = (iso: string, key: DateRangeKey): boolean => {
 // ─── Page component ───────────────────────────────────────────────────────────
 
 /**
- * Place this file at:  app/admin/pickups/page.tsx
+ * Place this file at:  app/pickups/page.tsx
  *
  * This is a Client Component ("use client") because it manages filter state
  * locally. If you later want URL-driven filters (shareable links, back-button
@@ -307,7 +307,7 @@ const AdminPickups = () => {
                                 <td className="px-4 py-3">
                                     {/* Link to={...} → href={...} */}
                                     <Link
-                                        href={`/admin/pickups/${p.id}`}
+                                        href={`/pickups/${p.id}`}
                                         data-testid={`pickup-row-${p.id}`}
                                         className="font-display font-bold tracking-tight text-[#121710] hover:text-[#C45B38]"
                                     >
@@ -369,7 +369,7 @@ const AdminPickups = () => {
                 {filtered.map((p) => (
                     <li key={p.id}>
                         <Link
-                            href={`/admin/pickups/${p.id}`}
+                            href={`/pickups/${p.id}`}
                             data-testid={`pickup-card-${p.id}`}
                             className="block rounded-sm border border-[#D1CDBC] bg-white p-4"
                         >

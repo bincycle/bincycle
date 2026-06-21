@@ -452,25 +452,25 @@ const AdminOverview = () => {
                 <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
                     {[
                         {
-                            to: "/admin/pickups",
+                            to: "/pickups",
                             icon: ListChecks,
                             label: "View all pickups",
                             testid: "qa-pickups",
                         },
                         {
-                            to: "/admin/executives",
+                            to: "/executives",
                             icon: UserPlus,
                             label: "Manage executives",
                             testid: "qa-execs",
                         },
                         {
-                            to: "/admin/customers",
+                            to: "/customers",
                             icon: Eye,
                             label: "Browse customers",
                             testid: "qa-customers",
                         },
                         {
-                            to: "/admin/me",
+                            to: "/me",
                             icon: PlusCircle,
                             label: "Admin profile",
                             testid: "qa-profile",
@@ -503,7 +503,7 @@ const AdminOverview = () => {
                     title="Recent pickups"
                     action={
                         <Link
-                            href="/admin/pickups"
+                            href="/pickups"
                             data-testid="link-all-pickups"
                             className="text-xs text-[#C45B38] hover:underline"
                         >
@@ -518,7 +518,7 @@ const AdminOverview = () => {
                             {recentPickups.map((p) => (
                                 <li key={p.id}>
                                     <Link
-                                        href={`/admin/pickups/${p.pickup_id}`}
+                                        href={`/pickups/${p.pickup_id}`}
                                         data-testid={`overview-pickup-${p.pickup_id}`}
                                         className="flex items-center justify-between gap-3 rounded-sm border border-[#D1CDBC] bg-[#F7F5F0] p-3 hover:border-[#121710] transition-colors"
                                     >
@@ -550,7 +550,7 @@ const AdminOverview = () => {
                     title="New customers"
                     action={
                         <Link
-                            href="/admin/customers"
+                            href="/customers"
                             data-testid="link-all-customers"
                             className="text-xs text-[#C45B38] hover:underline"
                         >
@@ -562,7 +562,7 @@ const AdminOverview = () => {
                         {customers.map((c) => (
                             <li key={c.id}>
                                 <Link
-                                    href={`/admin/customers/${c.id}`}
+                                    href={`/customers/${c.id}`}
                                     data-testid={`overview-customer-${c.id}`}
                                     className="flex items-center justify-between gap-3 rounded-sm border border-[#D1CDBC] bg-[#F7F5F0] p-3 hover:border-[#121710] transition-colors"
                                 >
@@ -591,7 +591,7 @@ const AdminOverview = () => {
                 title="Recent executive activity"
                 action={
                     <Link
-                        href="/admin/executives"
+                        href="/executives"
                         data-testid="link-all-execs"
                         className="text-xs text-[#C45B38] hover:underline"
                     >
@@ -603,7 +603,7 @@ const AdminOverview = () => {
                     {executives.map((e) => (
                         <li key={e.id}>
                             <Link
-                                href={`/admin/executives/${e.id}`}
+                                href={`/executives/${e.id}`}
                                 data-testid={`overview-exec-${e.id}`}
                                 className="flex items-center justify-between gap-3 rounded-sm border border-[#D1CDBC] bg-[#F7F5F0] p-3 hover:border-[#121710] transition-colors"
                             >

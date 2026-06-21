@@ -82,7 +82,7 @@ const AdminLogin = () => {
 
         setPending(false);
         toast.success(`Welcome back, ${profile.full_name.split(" ")[0]}.`);
-        router.replace("/admin/overview");
+        router.replace("/overview");
     };
 
     return (

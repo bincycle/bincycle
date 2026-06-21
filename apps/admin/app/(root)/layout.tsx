@@ -28,16 +28,16 @@ import AdminLogoutDialog from "@/components/AdminLogoutDialog";
 import { getAdminAuth, getAdminProfile } from "@workspace/data/adminMock";
 
 const NAV = [
-    { to: "/admin/overview", label: "Overview", icon: LayoutDashboard },
-    { to: "/admin/pickups", label: "Pickups", icon: Truck },
-    { to: "/admin/executives", label: "Executives", icon: UserCog },
-    { to: "/admin/customers", label: "Customers", icon: Users },
-    { to: "/admin/me", label: "Profile", icon: User },
+    { to: "/overview", label: "Overview", icon: LayoutDashboard },
+    { to: "/pickups", label: "Pickups", icon: Truck },
+    { to: "/executives", label: "Executives", icon: UserCog },
+    { to: "/customers", label: "Customers", icon: Users },
+    { to: "/me", label: "Profile", icon: User },
 ];
 
 const AdminBrand = () => (
     <Link
-        href="/admin/overview"
+        href="/overview"
         data-testid="admin-brand"
         className="flex items-center gap-2.5"
     >
@@ -107,7 +107,7 @@ const SidebarNav = ({
         </nav>
         <div className="m-3 rounded-sm border border-[#F7F5F0]/10 bg-[#F7F5F0]/5 p-3 flex items-center gap-3">
             <Link
-                href="/admin/me"
+                href="/me"
                 onClick={onNavigate}
                 data-testid="admin-sidebar-profile"
                 className="flex items-center gap-3 min-w-0 flex-1"
@@ -160,7 +160,7 @@ export const AdminLayout = ({ children }: AdminLayoutProps) => {
     }, [pathname]);
 
     // useEffect(() => {
-        // if (!auth) router.replace("/admin/login");
+        // if (!auth) router.replace("/login");
     // }, [auth, router]);
 
     // if (!auth) return null;
@@ -216,7 +216,7 @@ export const AdminLayout = ({ children }: AdminLayoutProps) => {
                     </Sheet>
                     <AdminBrand />
                     <Link
-                        href="/admin/me"
+                        href="/me"
                         data-testid="admin-topbar-profile"
                         aria-label="Profile"
                     >

@@ -211,7 +211,7 @@ const AdminExecutives = () => {
 
                                 <div className="mt-5 flex items-center gap-2">
                                     <Link
-                                        href={`/admin/executives/${e.id}`}
+                                        href={`/executives/${e.id}`}
                                         data-testid={`view-exec-${e.id}`}
                                         className="flex-1 inline-flex items-center justify-center rounded-sm border border-[#121710] px-3 py-2 text-xs font-medium text-[#121710] hover:bg-[#121710] hover:text-[#F7F5F0] transition-colors"
                                     >

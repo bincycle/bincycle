@@ -45,7 +45,7 @@ const AdminExecutiveDetails = () => {
         return (
             <div className="px-5 sm:px-8 lg:px-10 py-10">
                 <Link
-                    href="/admin/executives"
+                    href="/executives"
                     className="inline-flex items-center gap-2 text-sm text-[#596155] hover:text-[#121710] mb-6"
                 >
                     <ArrowLeft size={14} /> Back to executives
@@ -160,7 +160,7 @@ const AdminExecutiveDetails = () => {
                 title="Recent pickups"
                 action={
                     <Link
-                        href={`/admin/pickups?exec=${exec.id}`}
+                        href={`/pickups?exec=${exec.id}`}
                         data-testid="exec-view-all-pickups"
                         className="text-xs text-[#C45B38] hover:underline"
                     >
@@ -178,7 +178,7 @@ const AdminExecutiveDetails = () => {
                         {recent.map((p) => (
                             <li key={p.id}>
                                 <Link
-                                    href={`/admin/pickups/${p.id}`}
+                                    href={`/pickups/${p.id}`}
                                     data-testid={`exec-pickup-${p.id}`}
                                     className="flex items-center justify-between gap-3 rounded-sm border border-[#D1CDBC] bg-[#F7F5F0] p-3 hover:border-[#121710] transition-colors"
                                 >

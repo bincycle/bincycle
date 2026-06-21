@@ -205,7 +205,7 @@ const AdminCustomers = () => {
                                     >
                                         <td className="px-4 py-3">
                                             <Link
-                                                href={`/admin/customers/${c.id}`}
+                                                href={`/customers/${c.id}`}
                                                 data-testid={`customer-row-${c.id}`}
                                                 className="flex items-center gap-3"
                                             >
@@ -261,7 +261,7 @@ const AdminCustomers = () => {
                         {filtered.map((c) => (
                             <li key={c.id}>
                                 <Link
-                                    href={`/admin/customers/${c.id}`}
+                                    href={`/customers/${c.id}`}
                                     data-testid={`customer-card-${c.id}`}
                                     className="block rounded-sm border border-[#D1CDBC] bg-white p-4"
                                 >
