@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Search } from "lucide-react";
 import { format, parseISO, formatDistanceToNow } from "date-fns";
@@ -12,33 +12,18 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@workspace/ui/components/select";
-import {
-    AdminPageHeader,
-    EmptyState,
-} from "@/components/AdminUI";
-import {
-    Avatar,
-    AvatarFallback,
-    AvatarImage,
-} from "@workspace/ui/components/avatar";
-import { createClient } from "@workspace/supabase/client";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface CustomerStats {
-    totalPickups: number;
-    totalSpend: number;
-    lastActivity?: string;
-}
+import { AdminPageHeader, EmptyState } from "@/components/AdminUI";
+import { Avatar, AvatarFallback, AvatarImage } from "@workspace/ui/components/avatar";
+import { loadCustomers, customerStats } from "@workspace/data/adminMock";
 
 interface EnrichedCustomer {
     id: string;
-    full_name: string;
+    name: string;
     email: string;
-    phone: string | null;
-    avatar_url: string | null;
-    created_at: string;
-    stats: CustomerStats;
+    phone: string;
+    plan: string;
+    avatar?: string;
+    stats: ReturnType<typeof customerStats>;
 }
 
 interface AggregateStats {
@@ -48,166 +33,53 @@ interface AggregateStats {
     activeWeekly: number;
 }
 
-// ─── Admin Customers page ──────────────────────────────────────────────────────
-
 const AdminCustomers = () => {
-    const supabase = createClient();
-
     const [q, setQ] = useState("");
-    const [planFilter, setPlanFilter] = useState("all");
-    const [customers, setCustomers] = useState<EnrichedCustomer[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [plan, setPlan] = useState("all");
 
-    // ── Fetch customers with stats ─────────────────────────────────────────
-    const fetchCustomers = useCallback(async () => {
-        setLoading(true);
+    const customers = useMemo(() => loadCustomers(), []);
+    const enriched: EnrichedCustomer[] = useMemo(
+        () =>
+            customers.map((c) => ({
+                ...c,
+                stats: customerStats(c.id),
+            })),
+        [customers]
+    );
 
-        try {
-            // 1. Get all customers (profiles with role = 'customer')
-            const { data: customersData, error: customersError } =
-                await supabase
-                    .from("profiles")
-                    .select("id, full_name, email, phone, avatar_url, created_at")
-                    .eq("role", "customer")
-                    .order("created_at", { ascending: false });
-
-            if (customersError) throw customersError;
-
-            // 2. For each customer, fetch their stats (pickups, spend, last activity)
-            const enriched = await Promise.all(
-                (customersData ?? []).map(async (c) => {
-                    const [
-                        { count: totalPickups },
-                        { data: paymentData },
-                        { data: lastPickupData },
-                    ] = await Promise.all([
-                        // Count pickups
-                        supabase
-                            .from("pickups")
-                            .select("id", { count: "exact", head: true })
-                            .eq("customer_id", c.id),
-                        // Sum spent (paid payments only)
-                        supabase
-                            .from("payments")
-                            .select("amount")
-                            .eq("customer_id", c.id)
-                            .eq("status", "paid"),
-                        // Last activity (most recent pickup)
-                        supabase
-                            .from("pickups")
-                            .select("created_at")
-                            .eq("customer_id", c.id)
-                            .order("created_at", { ascending: false })
-                            .limit(1)
-                            .maybeSingle<{ created_at: string }>(),
-                    ]);
-
-                    const totalSpend = (paymentData ?? []).reduce(
-                        (sum, p) => sum + (p.amount || 0),
-                        0
-                    );
-
-                    return {
-                        ...c,
-                        stats: {
-                            totalPickups: totalPickups ?? 0,
-                            totalSpend,
-                            lastActivity:
-                                lastPickupData?.created_at ||
-                                c.created_at,
-                        },
-                    };
-                })
-            );
-
-            setCustomers(enriched);
-        } catch (err) {
-            console.error("Failed to fetch customers:", err);
-        }
-
-        setLoading(false);
-    }, []);
-
-    useEffect(() => {
-        fetchCustomers();
-    }, [fetchCustomers]);
-
-    // ── Filter logic ───────────────────────────────────────────────────────
     const filtered = useMemo(() => {
         const qq = q.trim().toLowerCase();
-        return customers.filter((c) => {
-            // Plan filter: based on pickup frequency/pattern
-            // For now, we'll assume all are on-demand since we don't have a plan field
-            // In a real system, you'd have a subscription/plan table
-            if (planFilter !== "all") {
-                // Placeholder: filter by activity pattern
-                // Weekly users have pickups in recent weeks
-                // For now, all are "On-demand"
-                if (planFilter !== "On-demand") return false;
-            }
-
-            // Search filter
+        return enriched.filter((c) => {
+            if (plan !== "all" && c.plan !== plan) return false;
             if (qq) {
-                const blob = [
-                    c.full_name,
-                    c.email,
-                    c.phone,
-                ]
-                    .filter(Boolean)
+                const blob = [c.name, c.email, c.phone]
                     .join(" ")
                     .toLowerCase();
                 if (!blob.includes(qq)) return false;
             }
             return true;
         });
-    }, [customers, q, planFilter]);
+    }, [enriched, q, plan]);
 
-    // ── Aggregate stats ────────────────────────────────────────────────────
     const aggregate: AggregateStats = useMemo(() => {
-        const totalSpend = customers.reduce(
+        const totalSpend = enriched.reduce(
             (s, c) => s + (c.stats?.totalSpend || 0),
             0
         );
-        const totalPickups = customers.reduce(
+        const totalPickups = enriched.reduce(
             (s, c) => s + (c.stats?.totalPickups || 0),
             0
         );
-        // Recurring: customers with recent activity (in last 7 days)
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const activeWeekly = customers.filter((c) => {
-            if (!c.stats.lastActivity) return false;
-            return (
-                new Date(c.stats.lastActivity) >= sevenDaysAgo
-            );
-        }).length;
-
+        const activeWeekly = enriched.filter(
+            (c) => c.plan === "Weekly" || c.plan === "Household+"
+        ).length;
         return {
-            total: customers.length,
+            total: enriched.length,
             totalSpend,
             totalPickups,
             activeWeekly,
         };
-    }, [customers]);
-
-    if (loading) {
-        return (
-            <div
-                data-testid="admin-customers-page"
-                className="px-5 sm:px-8 lg:px-10 py-8 lg:py-10"
-            >
-                <AdminPageHeader
-                    eyebrow="[ admin · customers ]"
-                    title="Customers"
-                    description="Search and inspect every household, office and society on the platform."
-                />
-                <div className="mt-6 space-y-3">
-                    <div className="h-20 rounded-sm bg-[#EDE9DC] animate-pulse" />
-                    <div className="h-64 rounded-sm bg-[#EDE9DC] animate-pulse" />
-                </div>
-            </div>
-        );
-    }
+    }, [enriched]);
 
     return (
         <div
@@ -220,7 +92,6 @@ const AdminCustomers = () => {
                 description="Search and inspect every household, office and society on the platform."
             />
 
-            {/* Summary stats */}
             <div
                 data-testid="customers-summary"
                 className="grid grid-cols-2 md:grid-cols-4 gap-px overflow-hidden rounded-sm border border-[#D1CDBC] bg-[#D1CDBC] mb-5"
@@ -235,7 +106,7 @@ const AdminCustomers = () => {
                 </div>
                 <div className="bg-white p-4">
                     <p className="font-mono-label text-[10px] text-[#596155]">
-                        Active this week
+                        Recurring plans
                     </p>
                     <p className="font-display text-2xl font-black text-[#284226] mt-1">
                         {aggregate.activeWeekly}
@@ -259,7 +130,6 @@ const AdminCustomers = () => {
                 </div>
             </div>
 
-            {/* Filters */}
             <div
                 data-testid="customers-filters"
                 className="rounded-sm border border-[#D1CDBC] bg-white p-3 mb-4 grid gap-2 sm:grid-cols-12"
@@ -278,7 +148,7 @@ const AdminCustomers = () => {
                     />
                 </div>
                 <div className="sm:col-span-4">
-                    <Select value={planFilter} onValueChange={setPlanFilter}>
+                    <Select value={plan} onValueChange={setPlan}>
                         <SelectTrigger
                             data-testid="customers-filter-plan"
                             className="h-10 rounded-sm border-[#D1CDBC] focus:ring-[#284226]"
@@ -289,15 +159,12 @@ const AdminCustomers = () => {
                             <SelectItem value="all">All plans</SelectItem>
                             <SelectItem value="On-demand">On-demand</SelectItem>
                             <SelectItem value="Weekly">Weekly</SelectItem>
-                            <SelectItem value="Household+">
-                                Household+
-                            </SelectItem>
+                            <SelectItem value="Household+">Household+</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
             </div>
 
-            {/* Empty state */}
             {filtered.length === 0 ? (
                 <EmptyState title="No customers match" />
             ) : (
@@ -315,6 +182,9 @@ const AdminCustomers = () => {
                                     </th>
                                     <th className="text-left font-mono-label text-[10px] font-normal px-4 py-3">
                                         CONTACT
+                                    </th>
+                                    <th className="text-left font-mono-label text-[10px] font-normal px-4 py-3">
+                                        PLAN
                                     </th>
                                     <th className="text-right font-mono-label text-[10px] font-normal px-4 py-3">
                                         PICKUPS
@@ -340,18 +210,13 @@ const AdminCustomers = () => {
                                                 className="flex items-center gap-3"
                                             >
                                                 <Avatar className="h-8 w-8">
-                                                    <AvatarImage
-                                                        src={
-                                                            c.avatar_url ||
-                                                            undefined
-                                                        }
-                                                    />
+                                                    <AvatarImage src={c.avatar} />
                                                     <AvatarFallback>
-                                                        {c.full_name[0]}
+                                                        {c.name[0]}
                                                     </AvatarFallback>
                                                 </Avatar>
                                                 <span className="font-medium text-[#121710] hover:text-[#C45B38]">
-                                                    {c.full_name}
+                                                    {c.name}
                                                 </span>
                                             </Link>
                                         </td>
@@ -359,9 +224,12 @@ const AdminCustomers = () => {
                                             <p className="truncate max-w-[200px]">
                                                 {c.email}
                                             </p>
-                                            <p className="text-xs">
-                                                {c.phone || "—"}
-                                            </p>
+                                            <p className="text-xs">{c.phone}</p>
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <span className="font-mono-label text-[10px] border border-[#D1CDBC] bg-[#F7F5F0] text-[#121710] px-2 py-0.5 rounded-sm">
+                                                {c.plan?.toUpperCase()}
+                                            </span>
                                         </td>
                                         <td className="px-4 py-3 text-right font-display font-bold tracking-tight text-[#121710]">
                                             {c.stats.totalPickups}
@@ -376,8 +244,7 @@ const AdminCustomers = () => {
                                             {c.stats.lastActivity
                                                 ? formatDistanceToNow(
                                                       parseISO(
-                                                          c.stats
-                                                              .lastActivity
+                                                          c.stats.lastActivity
                                                       ),
                                                       { addSuffix: true }
                                                   )
@@ -400,19 +267,14 @@ const AdminCustomers = () => {
                                 >
                                     <div className="flex items-center gap-3">
                                         <Avatar className="h-10 w-10">
-                                            <AvatarImage
-                                                src={
-                                                    c.avatar_url ||
-                                                    undefined
-                                                }
-                                            />
+                                            <AvatarImage src={c.avatar} />
                                             <AvatarFallback>
-                                                {c.full_name[0]}
+                                                {c.name[0]}
                                             </AvatarFallback>
                                         </Avatar>
                                         <div className="min-w-0 flex-1">
                                             <p className="font-semibold text-[#121710] truncate">
-                                                {c.full_name}
+                                                {c.name}
                                             </p>
                                             <p className="text-xs text-[#596155] truncate">
                                                 {c.email}
@@ -420,6 +282,14 @@ const AdminCustomers = () => {
                                         </div>
                                     </div>
                                     <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                                        <div>
+                                            <p className="font-mono-label text-[9px] text-[#596155]">
+                                                PLAN
+                                            </p>
+                                            <p className="text-xs font-medium text-[#121710]">
+                                                {c.plan}
+                                            </p>
+                                        </div>
                                         <div>
                                             <p className="font-mono-label text-[9px] text-[#596155]">
                                                 PICKUPS
@@ -437,25 +307,6 @@ const AdminCustomers = () => {
                                                 {c.stats.totalSpend.toLocaleString(
                                                     "en-IN"
                                                 )}
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <p className="font-mono-label text-[9px] text-[#596155]">
-                                                LAST
-                                            </p>
-                                            <p className="text-xs text-[#596155]">
-                                                {c.stats.lastActivity
-                                                    ? formatDistanceToNow(
-                                                          parseISO(
-                                                              c.stats
-                                                                  .lastActivity
-                                                          ),
-                                                          {
-                                                              addSuffix:
-                                                                  false,
-                                                          }
-                                                      )
-                                                    : "—"}
                                             </p>
                                         </div>
                                     </div>
