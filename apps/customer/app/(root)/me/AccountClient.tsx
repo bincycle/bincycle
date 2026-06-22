@@ -49,27 +49,27 @@ const TABS: Tab[] = [
     icon: MapPin,
     Component: AddressesTab,
   },
-  {
-    id: "notifications",
-    label: "Notifications",
-    description: "Email, SMS, reminders",
-    icon: Bell,
-    Component: NotificationsTab,
-  },
-  {
-    id: "security",
-    label: "Security",
-    description: "Password, sessions, 2FA",
-    icon: ShieldCheck,
-    Component: SecurityTab,
-  },
-  {
-    id: "billing",
-    label: "Billing",
-    description: "Plan, payments, invoices",
-    icon: CreditCard,
-    Component: BillingTab,
-  },
+  // {
+  //   id: "notifications",
+  //   label: "Notifications",
+  //   description: "Email, SMS, reminders",
+  //   icon: Bell,
+  //   Component: NotificationsTab,
+  // },
+  // {
+  //   id: "security",
+  //   label: "Security",
+  //   description: "Password, sessions, 2FA",
+  //   icon: ShieldCheck,
+  //   Component: SecurityTab,
+  // },
+  // {
+  //   id: "billing",
+  //   label: "Billing",
+  //   description: "Plan, payments, invoices",
+  //   icon: CreditCard,
+  //   Component: BillingTab,
+  // },
 ];
 
 const isValidTab = (id: string | null): id is TabId =>

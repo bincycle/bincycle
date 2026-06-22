@@ -130,7 +130,7 @@ export default function LoginPage() {
         }
 
         toast.success("Signed in. Welcome back.");
-        router.push("/dashboard/book-pickup");
+        router.push("/book-pickup");
         router.refresh(); // sync Next.js server components with the new session
     };
 
