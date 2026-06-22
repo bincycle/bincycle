@@ -331,14 +331,16 @@ export const LocationPickerDialog = ({
         {/* Map — loaded dynamically with ssr: false */}
         <div
           data-testid="map-canvas-wrap"
-          className="h-56 sm:h-72 lg:h-80 flex-1 min-h-[14rem] relative"
+          className="w-full h-56 sm:h-72 lg:h-80 flex-1 min-h-[14rem] relative"
         >
-          <LeafletMap
-            initialCenter={initialCenter}
-            pos={pos}
-            recenterTarget={recenterTarget}
-            onMarkerMove={onMarkerMove}
-          />
+          {open && (
+            <LeafletMap
+              initialCenter={initialCenter}
+              pos={pos}
+              recenterTarget={recenterTarget}
+              onMarkerMove={onMarkerMove}
+            />
+          )}
         </div>
 
         <div className="p-3 sm:p-4 border-t border-[#D1CDBC] bg-white shrink-0">

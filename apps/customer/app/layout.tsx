@@ -4,6 +4,7 @@ import { Toaster } from "@workspace/ui/components/sonner";
 import CookieConsent from "@/components/CookieConsent";
 
 import "@workspace/ui/globals.css"
+import "leaflet/dist/leaflet.css"
 
 export const metadata: Metadata = {
     title: "Bincycle – On-demand waste pickup",

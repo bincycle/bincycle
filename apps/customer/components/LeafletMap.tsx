@@ -67,6 +67,25 @@ const ClickListener = ({ onPick }: ClickListenerProps) => {
   return null;
 };
 
+// Component to handle Leaflet container dimension invalidation inside dynamic/animating modal dialogs
+const InvalidateSizeController = () => {
+  const map = useMap();
+  useEffect(() => {
+    // Invalidate size immediately
+    map.invalidateSize();
+    // Schedule size invalidations at various stages of modal opening transitions
+    const timers = [100, 300, 600, 1000].map((delay) =>
+      setTimeout(() => {
+        map.invalidateSize();
+      }, delay)
+    );
+    return () => {
+      timers.forEach((t) => clearTimeout(t));
+    };
+  }, [map]);
+  return null;
+};
+
 // ---------------------------------------------------------------------------
 // Exported map component
 // ---------------------------------------------------------------------------
@@ -89,12 +108,13 @@ const LeafletMap = ({
       center={initialCenter}
       zoom={14}
       scrollWheelZoom
-      style={{ height: "100%", width: "100%" }}
+      style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0 }}
     >
       <TileLayer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
       />
+      <InvalidateSizeController />
       <RecenterController target={recenterTarget} />
       <ClickListener onPick={onMarkerMove} />
       <Marker
