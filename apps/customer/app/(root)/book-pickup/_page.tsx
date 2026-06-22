@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { format, parseISO, isValid } from "date-fns";
 import {
@@ -26,6 +26,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@workspace/ui/components/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@workspace/ui/components/select";
 import { Textarea } from "@workspace/ui/components/textarea";
 import { Label } from "@workspace/ui/components/label";
 import { Input } from "@workspace/ui/components/input";
@@ -38,25 +45,16 @@ import {
   DialogFooter,
 } from "@workspace/ui/components/dialog";
 import { toast } from "sonner";
-import { createClient } from "@workspace/supabase/client"; // adjust to your Supabase client path
+import { createClient } from "@workspace/supabase/client";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { loadDraft, saveDraft, clearDraft } from "@workspace/data/bookingPersistence";
 import CameraCaptureDialog, {
   type CapturedImage,
 } from "@/components/CameraCaptureDialog";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
 const BASE_FEE = 149;
 const MAX_IMAGES = 4;
 const MAX_IMAGE_MB = 5;
-const STORAGE_BUCKET = "pickup-images"; // your Supabase Storage bucket name
-
-const TIME_SLOTS = [
-  { id: "morning", range: "8 AM – 12 PM", label: "Morning slot" },
-  { id: "evening", range: "6 PM – 10 PM", label: "Evening slot" },
-] as const;
-
-type SlotId = (typeof TIME_SLOTS)[number]["id"];
 
 const today = () => {
   const d = new Date();
@@ -71,52 +69,90 @@ const maxDate = () => {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Address {
+interface TimeSlot {
   id: string;
-  label: string | null;
+  range: string;
+  label: string;
+}
+
+interface SavedAddress {
+  id: string;
+  label: string;
   address_line1: string;
-  address_line2: string | null;
   city: string;
-  state: string;
   pincode: string;
 }
 
-type SaveStatus = "idle" | "saving" | "saved";
-type DialogStep = "review" | "submitting" | "success";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Converts a data-URL (from camera) or File to a Blob ready for upload */
-async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
-  const res = await fetch(dataUrl);
-  return res.blob();
+interface Coupon {
+  code: string;
+  description: string;
+  type: "flat" | "percent";
+  value: number;
 }
-
-/** Generates a unique storage path for an image */
-function storagePath(userId: string, fileName: string) {
-  const ts = Date.now();
-  const safe = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
-  return `${userId}/${ts}-${safe}`;
-}
-
-// ─── Sub-components ───────────────────────────────────────────────────────────
 
 interface BookingSummaryListProps {
   date: Date | undefined;
-  selectedSlot: (typeof TIME_SLOTS)[number] | undefined;
-  selectedAddress: Address | undefined;
+  selectedSlot: TimeSlot | undefined;
+  selectedAddress: SavedAddress | undefined;
   notes: string;
-  imageCount: number;
-  couponCode?: string;
+  images: CapturedImage[];
+  couponCode: string | undefined;
   discount: number;
 }
+
+type SaveStatus = "idle" | "saving" | "saved";
+type DialogStep = "review" | "success";
+
+// ─── Static time slots ────────────────────────────────────────────────────────
+// Keep these client-side; they don't need a DB round-trip.
+
+const TIME_SLOTS: TimeSlot[] = [
+  // { id: "slot_8_10",  range: "8 AM – 10 AM",  label: "Morning" },
+  // { id: "slot_10_12", range: "10 AM – 12 PM", label: "Late Morning" },
+  // { id: "slot_12_14", range: "12 PM – 2 PM",  label: "Noon" },
+  // { id: "slot_14_16", range: "2 PM – 4 PM",   label: "Afternoon" },
+  // { id: "slot_16_18", range: "4 PM – 6 PM",   label: "Evening" },
+  // { id: "slot_18_20", range: "6 PM – 8 PM",   label: "Late Evening" },
+  { id: "slot_8_12", range: "8 AM - 12 PM",   label: "Morning" },
+  { id: "slot_18_22", range: "6 PM - 10 PM",   label: "Evening" },
+];
+
+// ─── S3 image upload via API route ───────────────────────────────────────────
+// Your Next.js API route at /api/upload-image handles the AWS SDK call
+// server-side, keeping your S3 credentials out of the browser bundle.
+
+async function uploadImageToS3(
+  file: File,
+  userId: string,
+  pickupId: string
+): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("userId", userId);
+  formData.append("pickupId", pickupId);
+
+  const res = await fetch("/api/upload-image", {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const { error } = await res.json().catch(() => ({ error: "Upload failed" }));
+    throw new Error(error ?? "Upload failed");
+  }
+
+  const { url } = await res.json();
+  return url as string;
+}
+
+// ─── Shared summary list ──────────────────────────────────────────────────────
 
 const BookingSummaryList = ({
   date,
   selectedSlot,
   selectedAddress,
   notes,
-  imageCount,
+  images,
   couponCode,
   discount,
 }: BookingSummaryListProps) => (
@@ -135,7 +171,7 @@ const BookingSummaryList = ({
       <dt className="text-[#596155]">Address</dt>
       <dd className="text-right text-[#121710] max-w-[60%]">
         {selectedAddress
-          ? `${selectedAddress.label ?? ""} · ${selectedAddress.address_line1}`
+          ? `${selectedAddress.label} · ${selectedAddress.address_line1}`
           : "—"}
       </dd>
     </div>
@@ -147,10 +183,10 @@ const BookingSummaryList = ({
         </dd>
       </div>
     )}
-    {imageCount > 0 && (
+    {images.length > 0 && (
       <div className="flex justify-between">
         <dt className="text-[#596155]">Pictures</dt>
-        <dd className="text-[#121710]">{imageCount} attached</dd>
+        <dd className="text-[#121710]">{images.length} attached</dd>
       </div>
     )}
     {couponCode && discount > 0 && (
@@ -167,6 +203,8 @@ const BookingSummaryList = ({
   </dl>
 );
 
+// ─── Autosave indicator ───────────────────────────────────────────────────────
+
 const SaveIndicator = ({
   status,
   lastSavedAt,
@@ -175,7 +213,7 @@ const SaveIndicator = ({
   lastSavedAt: Date | null;
 }) => {
   if (status === "idle") return null;
-  if (status === "saving")
+  if (status === "saving") {
     return (
       <span
         data-testid="autosave-indicator"
@@ -186,6 +224,7 @@ const SaveIndicator = ({
         Saving...
       </span>
     );
+  }
   return (
     <span
       data-testid="autosave-indicator"
@@ -193,7 +232,7 @@ const SaveIndicator = ({
       className="inline-flex items-center gap-2 rounded-sm border border-[#D1CDBC] bg-white px-2.5 py-1.5 font-mono-label text-[10px] text-[#596155]"
     >
       <CheckCircle size={12} className="text-[#284226]" />
-      Saved locally
+      Draft saved
       {lastSavedAt && (
         <span className="text-[#596155]/70">
           · {format(lastSavedAt, "HH:mm")}
@@ -209,85 +248,100 @@ const BookPickup = () => {
   const router = useRouter();
   const supabase = createClient();
 
-  // ── Auth & remote data ─────────────────────────────────────────────────────
-  const [userId, setUserId] = useState<string | null>(null);
-  const [userName, setUserName] = useState("there");
-  const [addresses, setAddresses] = useState<Address[]>([]);
+  // Auth
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [userFirstName, setUserFirstName] = useState("there");
+
+  // Fetched data
+  const [addresses, setAddresses] = useState<SavedAddress[]>([]);
   const [loadingAddresses, setLoadingAddresses] = useState(true);
 
-  // ── Form state ─────────────────────────────────────────────────────────────
+  // Form state
   const [date, setDate] = useState<Date | undefined>(undefined);
-  const [slotId, setSlotId] = useState<SlotId | null>(null);
+  const [slotId, setSlotId] = useState<string | null>(null);
   const [addressId, setAddressId] = useState("");
   const [notes, setNotes] = useState("");
   const [images, setImages] = useState<CapturedImage[]>([]);
+
+  // Coupon (still validated client-side; swap for a Supabase function call if needed)
   const [couponInput, setCouponInput] = useState("");
-  const [appliedCoupon, setAppliedCoupon] = useState<{
-    code: string;
-    discount: number;
-    description: string;
-  } | null>(null);
+  const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
   const [couponError, setCouponError] = useState("");
 
-  // ── Dialog / booking ───────────────────────────────────────────────────────
+  // Dialog / booking
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [dialogStep, setDialogStep] = useState<DialogStep>("review");
   const [bookingId, setBookingId] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
 
-  // ── Autosave ───────────────────────────────────────────────────────────────
+  // Draft autosave
   const [hydrated, setHydrated] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const min = useMemo(() => today(), []);
   const max = useMemo(() => maxDate(), []);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selectedAddress = addresses.find((a) => a.id === addressId);
   const selectedSlot = TIME_SLOTS.find((s) => s.id === slotId);
-  const discount = appliedCoupon?.discount ?? 0;
+
+  const discount = useMemo(() => {
+    if (!appliedCoupon) return 0;
+    if (appliedCoupon.type === "flat") return Math.min(appliedCoupon.value, BASE_FEE);
+    return Math.round((BASE_FEE * appliedCoupon.value) / 100);
+  }, [appliedCoupon]);
+
   const total = Math.max(0, BASE_FEE - discount);
 
-  // ── Fetch user + addresses on mount ───────────────────────────────────────
+  // ── Auth + profile ──────────────────────────────────────────────────────────
   useEffect(() => {
-    const init = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (!data.user) { router.replace("/login"); return; }
+      setUser(data.user);
 
-      if (!user) {
-        router.push("/login");
-        return;
-      }
-      setUserId(user.id);
-
-      // Fetch profile name
+      // Fetch first name from profiles
       const { data: profile } = await supabase
         .from("profiles")
         .select("full_name")
-        .eq("id", user.id)
-        .single();
-      if (profile?.full_name) setUserName(profile.full_name.split(" ")[0]);
+        .eq("id", data.user.id)
+        .single<{ full_name: string }>();
 
-      // Fetch saved addresses
-      setLoadingAddresses(true);
-      const { data: addrs, error } = await supabase
-        .from("addresses")
-        .select("id, label, address_line1, address_line2, city, state, pincode")
-        .eq("customer_id", user.id)
-        .order("is_default", { ascending: false });
-
-      if (error) toast.error("Couldn't load your saved addresses.");
-      else setAddresses(addrs ?? []);
-      setLoadingAddresses(false);
-    };
-
-    init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      if (profile?.full_name) {
+        setUserFirstName(profile.full_name.split(" ")[0]);
+      }
+    });
   }, []);
 
-  // ── Hydrate draft from localStorage ───────────────────────────────────────
+  // ── Fetch saved addresses ───────────────────────────────────────────────────
+  const fetchAddresses = useCallback(async () => {
+    if (!user) return;
+    setLoadingAddresses(true);
+    const { data, error } = await supabase
+      .from("addresses")
+      .select("id, label, address_line1, city, pincode")
+      .eq("customer_id", user.id)
+      .order("is_default", { ascending: false })
+      .returns<SavedAddress[]>();
+
+    if (error) {
+      toast.error("Couldn't load your saved addresses.");
+    } else {
+      setAddresses(data ?? []);
+      // Pre-select the default address if nothing is selected yet
+      if (!addressId && data && data.length > 0) {
+        setAddressId(data[0].id);
+      }
+    }
+    setLoadingAddresses(false);
+  }, [user?.id]);
+
+  useEffect(() => {
+    fetchAddresses();
+  }, [fetchAddresses]);
+
+  // ── Hydrate draft from localStorage ────────────────────────────────────────
   useEffect(() => {
     const draft = loadDraft();
     if (draft) {
@@ -295,17 +349,17 @@ const BookPickup = () => {
         const parsed = parseISO(draft.date);
         if (isValid(parsed) && parsed >= min && parsed <= max) setDate(parsed);
       }
-      if (draft.slotId && TIME_SLOTS.some((s) => s.id === draft.slotId))
-        setSlotId(draft.slotId as SlotId);
+      if (draft.slotId) setSlotId(draft.slotId);
       if (draft.addressId) setAddressId(draft.addressId);
       if (typeof draft.notes === "string") setNotes(draft.notes);
-      // Images are NOT restored from draft — data URLs can be large and stale
+      // Don't restore image data URLs from draft — they're large blobs and
+      // will be re-uploaded anyway. Just restore the count label if needed.
     }
     setHydrated(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Autosave (no images — too heavy for localStorage) ─────────────────────
+  // ── Autosave draft (debounced, no images — S3 URLs exist only after submit) ─
   useEffect(() => {
     if (!hydrated) return;
     const empty = !date && !slotId && !addressId && !notes && !appliedCoupon;
@@ -322,6 +376,7 @@ const BookPickup = () => {
         slotId,
         addressId,
         notes,
+        images: [], // images live in S3, not localStorage
         couponCode: appliedCoupon?.code ?? null,
       });
       setLastSavedAt(new Date());
@@ -330,38 +385,25 @@ const BookPickup = () => {
     return () => clearTimeout(t);
   }, [date, slotId, addressId, notes, appliedCoupon, hydrated]);
 
-  // ─── Image helpers ─────────────────────────────────────────────────────────
-
+  // ── Image handling (local previews only until confirm) ──────────────────────
   const onPickImages = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
     const room = MAX_IMAGES - images.length;
-    if (room <= 0) {
-      toast.error(`You can attach up to ${MAX_IMAGES} pictures.`);
-      return;
-    }
+    if (room <= 0) { toast.error(`Max ${MAX_IMAGES} pictures.`); return; }
     const accepted = files.slice(0, room);
     const next: CapturedImage[] = [];
     for (const file of accepted) {
       if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
-        toast.error(`${file.name} is over ${MAX_IMAGE_MB} MB and was skipped.`);
+        toast.error(`${file.name} is over ${MAX_IMAGE_MB} MB — skipped.`);
         continue;
       }
-      try {
-        const url = await new Promise<string>((res, rej) => {
-          const r = new FileReader();
-          r.onload = () => res(r.result as string);
-          r.onerror = rej;
-          r.readAsDataURL(file);
-        });
-        next.push({ name: file.name, type: file.type, size: file.size, url });
-      } catch {
-        toast.error(`Couldn't read ${file.name}.`);
-      }
+      // Store the File object on the CapturedImage so we can upload it later
+      const url = URL.createObjectURL(file);
+      next.push({ name: file.name, type: file.type, size: file.size, url, file });
     }
     if (next.length) setImages((prev) => [...prev, ...next]);
-    if (files.length > room)
-      toast(`Only added ${room} — limit is ${MAX_IMAGES}.`);
+    if (files.length > room) toast(`Only added ${room} — limit is ${MAX_IMAGES}.`);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -370,7 +412,7 @@ const BookPickup = () => {
 
   const onCameraCapture = (img: CapturedImage) => {
     if (images.length >= MAX_IMAGES) {
-      toast.error(`You can attach up to ${MAX_IMAGES} pictures.`);
+      toast.error(`Max ${MAX_IMAGES} pictures.`);
       return;
     }
     setImages((prev) => [...prev, img]);
@@ -378,7 +420,7 @@ const BookPickup = () => {
 
   const openCamera = () => {
     if (images.length >= MAX_IMAGES) {
-      toast.error(`You can attach up to ${MAX_IMAGES} pictures.`);
+      toast.error(`Max ${MAX_IMAGES} pictures.`);
       return;
     }
     setCameraOpen(true);
@@ -389,15 +431,12 @@ const BookPickup = () => {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // ─── Coupon ────────────────────────────────────────────────────────────────
-  // Simple client-side coupon check — replace with a Supabase RPC if needed
+  // ── Coupon ─────────────────────────────────────────────────────────────────
+  // TODO: swap this for a Supabase RPC call to validate server-side
   const applyCoupon = () => {
     const code = couponInput.trim().toUpperCase();
-    if (!code) {
-      setCouponError("Enter a promo code.");
-      return;
-    }
-    // TODO: replace with `supabase.rpc('validate_coupon', { code })` when ready
+    if (!code) { setCouponError("Enter a promo code."); return; }
+    // Placeholder: replace with real validation
     setCouponError("That code isn't valid.");
     setAppliedCoupon(null);
   };
@@ -408,123 +447,115 @@ const BookPickup = () => {
     setCouponError("");
   };
 
-  // ─── Submit ────────────────────────────────────────────────────────────────
-
+  // ── Submit ─────────────────────────────────────────────────────────────────
   const canSubmit = !!(date && slotId && addressId);
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) {
-      toast.error(
-        "Please pick a date, a time slot and a saved address before booking."
-      );
+      toast.error("Please pick a date, a time slot and a saved address.");
       return;
     }
     setDialogStep("review");
     setConfirmOpen(true);
   };
 
-  /**
-   * 1. Upload all images to Supabase Storage
-   * 2. Collect their public URLs
-   * 3. Insert a new row into `pickups` with those URLs
-   */
-  const confirmBooking = useCallback(async () => {
-    if (!userId || !date || !slotId || !addressId) return;
-    setDialogStep("submitting");
+  // ── Confirm booking ────────────────────────────────────────────────────────
+  const confirmBooking = async () => {
+    if (!user || !date || !slotId || !addressId) return;
+    setConfirming(true);
 
-    // ── 1. Upload images ───────────────────────────────────────────────────
-    const imageUrls: string[] = [];
+    try {
+      // 1. Generate a human-readable pickup_id
+      const humanId = `PK-${Date.now().toString(36).toUpperCase()}`;
 
-    for (const img of images) {
-      try {
-        let blob: Blob;
-        if (img.url.startsWith("data:")) {
-          blob = await dataUrlToBlob(img.url);
-        } else {
-          // Already a remote URL (shouldn't happen in this flow, but guard anyway)
-          imageUrls.push(img.url);
-          continue;
+      // 2. Insert the pickup row
+      const { data: pickup, error: pickupError } = await supabase
+        .from("pickups")
+        .insert({
+          pickup_id: humanId,
+          customer_id: user.id,
+          address_id: addressId,
+          scheduled_date: format(date, "yyyy-MM-dd"),
+          scheduled_slot: slotId,
+          notes: notes.trim() || null,
+          total_amount: total,
+          status: "pending",
+          payment_status: "unpaid",
+        })
+        .select("id, pickup_id")
+        .single<{ id: string; pickup_id: string }>();
+
+      if (pickupError || !pickup) throw pickupError ?? new Error("Pickup insert failed");
+
+      // 3. Upload images to S3 in parallel, then record URLs in a metadata column
+      //    (or a separate pickup_images table if you add one later)
+      if (images.length > 0) {
+        const uploadResults = await Promise.allSettled(
+          images.map((img) => {
+            // img.file is set for file-picker images; img.url is a blob/data URL
+            // for camera captures — convert it to a File so we can POST it.
+            const file =
+              (img as CapturedImage & { file?: File }).file ??
+              dataUrlToFile(img.url, img.name || "capture.jpg", img.type || "image/jpeg");
+            return uploadImageToS3(file, user.id, pickup.id);
+          })
+        );
+
+        const s3Urls: string[] = [];
+        uploadResults.forEach((r, i) => {
+          if (r.status === "fulfilled") {
+            s3Urls.push(r.value);
+          } else {
+            console.error(`Image ${i} upload failed:`, r.reason);
+            toast.error(`Picture ${i + 1} failed to upload — skipped.`);
+          }
+        });
+
+        if (s3Urls.length > 0) {
+          const { error: imageUpdateError } = await supabase
+            .from("pickups")
+            .update({ image_urls: s3Urls })
+            .eq("id", pickup.id);
+
+          if (imageUpdateError) {
+            console.error("Failed to save image URLs:", imageUpdateError);
+            toast.error("Pictures uploaded but couldn't be linked to the pickup.");
+          }
         }
-
-        const path = storagePath(userId, img.name);
-        const { error: uploadError } = await supabase.storage
-          .from(STORAGE_BUCKET)
-          .upload(path, blob, {
-            contentType: img.type,
-            upsert: false,
-          });
-
-        if (uploadError) {
-          console.error("Upload error:", uploadError);
-          toast.error(`Failed to upload ${img.name}. Booking will continue without it.`);
-          continue;
-        }
-
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
-
-        imageUrls.push(publicUrl);
-      } catch (err) {
-        console.error("Unexpected upload error:", err);
-        toast.error(`Couldn't upload ${img.name}. Continuing without it.`);
       }
-    }
 
-    // ── 2. Generate human-readable pickup ID ──────────────────────────────
-    const pickupId = `BC-${Math.floor(Math.random() * 90000) + 10000}`;
-
-    // ── 3. Insert pickup row ───────────────────────────────────────────────
-    const { data: pickup, error: insertError } = await supabase
-      .from("pickups")
-      .insert({
-        pickup_id: pickupId,
-        customer_id: userId,
-        address_id: addressId,
-        scheduled_date: format(date, "yyyy-MM-dd"),
-        scheduled_slot: slotId, // "morning" | "evening"
-        notes: notes || null,
-        image_urls: imageUrls,
-        total_amount: total,
+      // 4. Insert a pending payment row
+      const { error: paymentInsertError } = await supabase.from("payments").insert({
+        pickup_id: pickup.id,
+        customer_id: user.id,
+        amount: total,
+        currency: "INR",
         status: "pending",
-        payment_status: "unpaid",
-      })
-      .select("id, pickup_id")
-      .single();
+      });
+      if (paymentInsertError) throw paymentInsertError;
 
-    if (insertError) {
-      console.error("Insert error:", insertError);
-      toast.error("Something went wrong creating your booking. Please try again.");
-      setDialogStep("review");
-      return;
+      setBookingId(pickup.pickup_id);
+      clearDraft();
+      setSaveStatus("idle");
+      setLastSavedAt(null);
+      setDialogStep("success");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Something went wrong.";
+      toast.error(msg);
+    } finally {
+      setConfirming(false);
     }
+  };
 
-    // ── 4. Success ─────────────────────────────────────────────────────────
-    setBookingId(pickup.pickup_id);
-    clearDraft();
-    setSaveStatus("idle");
-    setLastSavedAt(null);
-    setDialogStep("success");
-  }, [
-    userId,
-    date,
-    slotId,
-    addressId,
-    notes,
-    images,
-    total,
-    supabase,
-  ]);
-
-  // ─── Reset ─────────────────────────────────────────────────────────────────
-
+  // ── Reset ──────────────────────────────────────────────────────────────────
   const closeAndReset = () => {
     setConfirmOpen(false);
     setTimeout(() => {
+      const id = bookingId;
       setDate(undefined);
       setSlotId(null);
-      setAddressId("");
+      setAddressId(addresses[0]?.id ?? "");
       setNotes("");
       clearAllImages();
       setCouponInput("");
@@ -533,23 +564,21 @@ const BookPickup = () => {
       setBookingId(null);
       setDialogStep("review");
       clearDraft();
+      if (dialogStep === "success" && id) {
+        router.push(`/pickups/${id}`);
+      }
     }, 220);
   };
 
   const handleDialogChange = (open: boolean) => {
-    if (!open && dialogStep === "success") {
-      closeAndReset();
-      return;
-    }
-    // Prevent closing while upload/insert is in progress
-    if (dialogStep === "submitting") return;
-    setConfirmOpen(open);
+    if (!open && dialogStep === "success") { closeAndReset(); return; }
+    if (!confirming) setConfirmOpen(open);
   };
 
   const resetDraft = () => {
     setDate(undefined);
     setSlotId(null);
-    setAddressId("");
+    setAddressId(addresses[0]?.id ?? "");
     setNotes("");
     clearAllImages();
     setCouponInput("");
@@ -561,22 +590,12 @@ const BookPickup = () => {
     toast("Draft cleared.");
   };
 
-  const hasAnyValue = !!(
-    date ||
-    slotId ||
-    addressId ||
-    notes ||
-    images.length ||
-    appliedCoupon
-  );
+  const hasAnyValue = !!(date || slotId || addressId || notes || images.length || appliedCoupon);
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div
-      data-testid="book-pickup-page"
-      className="px-5 sm:px-10 lg:px-14 py-8 lg:py-12"
-    >
+    <div data-testid="book-pickup-page" className="px-5 sm:px-10 lg:px-14 py-8 lg:py-12">
       {/* Header */}
       <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6 mb-10">
         <div>
@@ -587,8 +606,9 @@ const BookPickup = () => {
             Schedule a pickup
           </h1>
           <p className="mt-3 text-[#596155] max-w-2xl">
-            Hi {userName} — pick a day in the next week, choose a slot, and
-            we&apos;ll handle the rest. Your progress is saved automatically.
+            Hi {userFirstName} — pick a day in the next week,
+            choose a 2-hour slot, and we&apos;ll handle the rest. Your progress
+            is saved automatically.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 self-start">
@@ -606,24 +626,17 @@ const BookPickup = () => {
         </div>
       </header>
 
-      <form
-        onSubmit={onSubmit}
-        className="grid gap-8 lg:grid-cols-12 lg:gap-10"
-      >
+      <form onSubmit={onSubmit} className="grid gap-8 lg:grid-cols-12 lg:gap-10">
         {/* LEFT COLUMN */}
         <div className="lg:col-span-8 space-y-6">
+
           {/* 01 · Date */}
-          <section
-            data-testid="section-date"
-            className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8"
-          >
+          <section data-testid="section-date" className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8">
             <div className="flex items-center gap-2 mb-5">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-sm bg-[#EDE9DC] text-[#284226]">
                 <CalendarIcon size={14} />
               </span>
-              <p className="font-mono-label text-xs text-[#596155]">
-                01 · Pickup date
-              </p>
+              <p className="font-mono-label text-xs text-[#596155]">01 · Pickup date</p>
             </div>
             <Popover>
               <PopoverTrigger asChild>
@@ -632,16 +645,11 @@ const BookPickup = () => {
                   data-testid="date-picker-trigger"
                   className="flex h-14 w-full items-center justify-between rounded-sm border border-[#D1CDBC] bg-[#F7F5F0] px-4 text-left text-base text-[#121710] hover:bg-[#EDE9DC] focus:outline-none focus:ring-2 focus:ring-[#284226]"
                 >
-                  {date
-                    ? format(date, "EEEE, d MMMM yyyy")
-                    : "Pick a date in the next 7 days"}
+                  {date ? format(date, "EEEE, d MMMM yyyy") : "Pick a date in the next 7 days"}
                   <CalendarIcon size={18} className="text-[#596155]" />
                 </button>
               </PopoverTrigger>
-              <PopoverContent
-                className="w-auto p-0 rounded-sm border-[#D1CDBC]"
-                align="start"
-              >
+              <PopoverContent className="w-auto p-0 rounded-sm border-[#D1CDBC]" align="start">
                 <Calendar
                   mode="single"
                   selected={date}
@@ -650,6 +658,7 @@ const BookPickup = () => {
                   toDate={max}
                   disabled={(d) => d < min || d > max}
                   initialFocus
+                  data-testid="date-picker-calendar"
                 />
               </PopoverContent>
             </Popover>
@@ -660,23 +669,14 @@ const BookPickup = () => {
           </section>
 
           {/* 02 · Time Slot */}
-          <section
-            data-testid="section-timeslot"
-            className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8"
-          >
+          <section data-testid="section-timeslot" className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8">
             <div className="flex items-center gap-2 mb-5">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-sm bg-[#EDE9DC] text-[#284226]">
                 <Clock size={14} />
               </span>
-              <p className="font-mono-label text-xs text-[#596155]">
-                02 · Time slot
-              </p>
+              <p className="font-mono-label text-xs text-[#596155]">02 · Time slot</p>
             </div>
-            <div
-              role="radiogroup"
-              data-testid="timeslot-group"
-              className="grid grid-cols-2 gap-3"
-            >
+            <div role="radiogroup" data-testid="timeslot-group" className="grid grid-cols-2 md:grid-cols-3 gap-3">
               {TIME_SLOTS.map((s) => {
                 const active = s.id === slotId;
                 return (
@@ -687,20 +687,14 @@ const BookPickup = () => {
                     aria-checked={active}
                     data-testid={`timeslot-${s.id}`}
                     onClick={() => setSlotId(s.id)}
-                    className={`rounded-sm border p-5 text-left transition-all ${
+                    className={`rounded-sm border p-4 text-left transition-all ${
                       active
                         ? "border-[#284226] bg-[#284226] text-[#F7F5F0]"
                         : "border-[#D1CDBC] bg-[#F7F5F0] text-[#121710] hover:border-[#284226]"
                     }`}
                   >
-                    <p className="font-display text-lg font-bold tracking-tight">
-                      {s.range}
-                    </p>
-                    <p
-                      className={`mt-1 text-xs ${
-                        active ? "text-[#F7F5F0]/70" : "text-[#596155]"
-                      }`}
-                    >
+                    <p className="font-display text-base font-bold tracking-tight">{s.range}</p>
+                    <p className={`mt-1 text-xs ${active ? "text-[#F7F5F0]/70" : "text-[#596155]"}`}>
                       {s.label}
                     </p>
                   </button>
@@ -710,92 +704,65 @@ const BookPickup = () => {
           </section>
 
           {/* 03 · Address */}
-          <section
-            data-testid="section-address"
-            className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8"
-          >
+          <section data-testid="section-address" className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8">
             <div className="flex items-center gap-2 mb-5">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-sm bg-[#EDE9DC] text-[#284226]">
                 <MapPin size={14} />
               </span>
-              <p className="font-mono-label text-xs text-[#596155]">
-                03 · Pickup address
-              </p>
+              <p className="font-mono-label text-xs text-[#596155]">03 · Pickup address</p>
             </div>
-
+            <Label className="sr-only">Pickup address</Label>
             {loadingAddresses ? (
-              <div className="flex items-center gap-2 h-14 text-sm text-[#596155]">
-                <Loader2 size={14} className="animate-spin" /> Loading your
-                addresses…
-              </div>
+              <div className="h-14 w-full rounded-sm bg-[#EDE9DC] animate-pulse" />
             ) : addresses.length === 0 ? (
-              <p className="text-sm text-[#596155]">
-                No saved addresses found.{" "}
-                <span
-                  className="text-[#C45B38] cursor-pointer underline underline-offset-2"
-                  onClick={() => router.push("/dashboard/addresses/new")}
-                >
-                  Add one first.
-                </span>
-              </p>
-            ) : (
-              <div
-                role="radiogroup"
-                data-testid="address-group"
-                className="space-y-2"
-              >
-                {addresses.map((a) => {
-                  const active = a.id === addressId;
-                  return (
-                    <button
-                      key={a.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={active}
-                      data-testid={`address-option-${a.id}`}
-                      onClick={() => setAddressId(a.id)}
-                      className={`w-full text-left rounded-sm border px-4 py-3 transition-all ${
-                        active
-                          ? "border-[#284226] bg-[#EDE9DC]"
-                          : "border-[#D1CDBC] bg-[#F7F5F0] hover:border-[#284226]"
-                      }`}
-                    >
-                      <p className="font-medium text-sm text-[#121710]">
-                        {a.label ?? "Address"}
-                      </p>
-                      <p className="text-xs text-[#596155] mt-0.5">
-                        {a.address_line1}
-                        {a.address_line2 ? `, ${a.address_line2}` : ""},{" "}
-                        {a.city} — {a.pincode}
-                      </p>
-                    </button>
-                  );
-                })}
+              <div className="rounded-sm border border-dashed border-[#D1CDBC] bg-[#F7F5F0] p-4 text-sm text-[#596155]">
+                No saved addresses yet.{" "}
+                <a href="/account?tab=addresses" className="text-[#284226] underline underline-offset-2">
+                  Add one in your account
+                </a>{" "}
+                before booking.
               </div>
+            ) : (
+              <Select value={addressId} onValueChange={setAddressId}>
+                <SelectTrigger
+                  data-testid="address-select-trigger"
+                  className="h-14 rounded-sm border-[#D1CDBC] bg-[#F7F5F0] focus:ring-[#284226] text-base"
+                >
+                  <SelectValue placeholder="Choose a saved address" />
+                </SelectTrigger>
+                <SelectContent className="rounded-sm">
+                  {addresses.map((a) => (
+                    <SelectItem key={a.id} value={a.id} data-testid={`address-option-${a.id}`} className="py-3">
+                      <div>
+                        <p className="font-medium text-[#121710]">{a.label}</p>
+                        <p className="text-xs text-[#596155]">
+                          {a.address_line1}, {a.city} — {a.pincode}
+                        </p>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {selectedAddress && (
+              <p className="mt-3 text-sm text-[#596155]" data-testid="address-selected-preview">
+                {selectedAddress.address_line1}, {selectedAddress.city} — {selectedAddress.pincode}
+              </p>
             )}
           </section>
 
           {/* 04 · Notes */}
-          <section
-            data-testid="section-notes"
-            className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8"
-          >
+          <section data-testid="section-notes" className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8">
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <span className="inline-flex h-7 w-7 items-center justify-center rounded-sm bg-[#EDE9DC] text-[#284226]">
                   <StickyNote size={14} />
                 </span>
-                <p className="font-mono-label text-xs text-[#596155]">
-                  04 · Additional notes
-                </p>
+                <p className="font-mono-label text-xs text-[#596155]">04 · Additional notes</p>
               </div>
-              <p className="font-mono-label text-[10px] text-[#596155]">
-                Optional
-              </p>
+              <p className="font-mono-label text-[10px] text-[#596155]">Optional</p>
             </div>
-            <Label htmlFor="notes" className="sr-only">
-              Additional notes
-            </Label>
+            <Label htmlFor="notes" className="sr-only">Additional notes</Label>
             <Textarea
               id="notes"
               data-testid="notes-textarea"
@@ -806,46 +773,32 @@ const BookPickup = () => {
               placeholder="Gate code, e-waste mixed in, leave bags by the side gate..."
               className="rounded-sm border-[#D1CDBC] focus-visible:ring-[#284226]"
             />
-            <p className="mt-2 text-right text-xs text-[#596155]">
-              {notes.length}/500
-            </p>
+            <p className="mt-2 text-right text-xs text-[#596155]">{notes.length}/500</p>
           </section>
 
           {/* 05 · Pictures */}
-          <section
-            data-testid="section-pictures"
-            className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8"
-          >
+          <section data-testid="section-pictures" className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8">
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <span className="inline-flex h-7 w-7 items-center justify-center rounded-sm bg-[#EDE9DC] text-[#284226]">
                   <ImageIcon size={14} />
                 </span>
-                <p className="font-mono-label text-xs text-[#596155]">
-                  05 · Pictures
-                </p>
+                <p className="font-mono-label text-xs text-[#596155]">05 · Pictures</p>
               </div>
               <p className="font-mono-label text-[10px] text-[#596155]">
-                {images.length}/{MAX_IMAGES} · up to {MAX_IMAGE_MB} MB each
+                {images.length}/{MAX_IMAGES} · up to {MAX_IMAGE_MB} MB each · uploaded on confirm
               </p>
             </div>
 
             {images.length > 0 && (
-              <div
-                data-testid="image-previews-grid"
-                className="mb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3"
-              >
+              <div data-testid="image-previews-grid" className="mb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                 {images.map((img, idx) => (
                   <div
                     key={`${img.name}-${idx}`}
                     data-testid={`image-preview-${idx}`}
                     className="group relative overflow-hidden rounded-sm border border-[#D1CDBC]"
                   >
-                    <img
-                      src={img.url}
-                      alt={img.name || `pic-${idx}`}
-                      className="h-28 w-full object-cover"
-                    />
+                    <img src={img.url} alt={img.name || `pic-${idx}`} className="h-28 w-full object-cover" />
                     <button
                       type="button"
                       onClick={() => removeImage(idx)}
@@ -864,10 +817,7 @@ const BookPickup = () => {
             )}
 
             {images.length < MAX_IMAGES && (
-              <div
-                data-testid="picture-actions"
-                className="grid gap-3 sm:grid-cols-2"
-              >
+              <div data-testid="picture-actions" className="grid gap-3 sm:grid-cols-2">
                 <label
                   htmlFor="images"
                   data-testid="image-upload-label"
@@ -875,13 +825,9 @@ const BookPickup = () => {
                 >
                   <UploadCloud size={22} className="text-[#596155]" />
                   <p className="mt-2 text-sm text-[#121710] font-medium">
-                    {images.length === 0
-                      ? "Upload from device"
-                      : "Add more from device"}
+                    {images.length === 0 ? "Upload from device" : "Add more from device"}
                   </p>
-                  <p className="text-xs text-[#596155]">
-                    PNG / JPG · up to {MAX_IMAGE_MB} MB each
-                  </p>
+                  <p className="text-xs text-[#596155]">PNG / JPG · up to {MAX_IMAGE_MB} MB each</p>
                   <input
                     id="images"
                     ref={fileInputRef}
@@ -899,16 +845,9 @@ const BookPickup = () => {
                   data-testid="open-camera-btn"
                   className="group flex h-32 w-full cursor-pointer flex-col items-center justify-center rounded-sm border-2 border-dashed border-[#D1CDBC] bg-[#171A15] text-center text-[#F7F5F0] transition-colors hover:border-[#C45B38] hover:bg-[#121710]"
                 >
-                  <Camera
-                    size={22}
-                    className="text-[#F7F5F0]/80 group-hover:text-[#C45B38]"
-                  />
-                  <p className="mt-2 text-sm font-medium">
-                    Capture with camera
-                  </p>
-                  <p className="text-xs text-[#F7F5F0]/60">
-                    Takes a photo right here
-                  </p>
+                  <Camera size={22} className="text-[#F7F5F0]/80 group-hover:text-[#C45B38]" />
+                  <p className="mt-2 text-sm font-medium">Capture with camera</p>
+                  <p className="text-xs text-[#F7F5F0]/60">Takes a photo right here</p>
                 </button>
               </div>
             )}
@@ -918,35 +857,22 @@ const BookPickup = () => {
         {/* RIGHT SUMMARY */}
         <aside className="lg:col-span-4">
           <div className="lg:sticky lg:top-8 rounded-sm border border-[#D1CDBC] bg-[#171A15] text-[#F7F5F0] p-6 sm:p-8">
-            <p className="font-mono-label text-xs text-[#F7F5F0]/60">
-              Booking summary
-            </p>
-            <h3 className="mt-3 font-display text-2xl font-bold tracking-tight">
-              On-demand pickup
-            </h3>
+            <p className="font-mono-label text-xs text-[#F7F5F0]/60">Booking summary</p>
+            <h3 className="mt-3 font-display text-2xl font-bold tracking-tight">On-demand pickup</h3>
 
             <dl className="mt-7 space-y-5 text-sm">
               <div className="flex justify-between gap-4">
                 <dt className="text-[#F7F5F0]/60">Date</dt>
-                <dd data-testid="summary-date">
-                  {date ? format(date, "EEE, d MMM") : "—"}
-                </dd>
+                <dd data-testid="summary-date">{date ? format(date, "EEE, d MMM") : "—"}</dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-[#F7F5F0]/60">Slot</dt>
-                <dd data-testid="summary-slot">
-                  {selectedSlot ? selectedSlot.range : "—"}
-                </dd>
+                <dd data-testid="summary-slot">{selectedSlot ? selectedSlot.range : "—"}</dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-[#F7F5F0]/60">Address</dt>
-                <dd
-                  className="text-right max-w-[60%]"
-                  data-testid="summary-address"
-                >
-                  {selectedAddress
-                    ? `${selectedAddress.label ?? ""} · ${selectedAddress.city}`
-                    : "—"}
+                <dd className="text-right max-w-[60%]" data-testid="summary-address">
+                  {selectedAddress ? `${selectedAddress.label} · ${selectedAddress.city}` : "—"}
                 </dd>
               </div>
               <div className="flex justify-between gap-4">
@@ -961,25 +887,15 @@ const BookPickup = () => {
             <div className="mt-8 pt-6 border-t border-[#F7F5F0]/15">
               <div className="flex items-center gap-2">
                 <BadgePercent size={14} className="text-[#C45B38]" />
-                <p className="font-mono-label text-[10px] text-[#F7F5F0]/60">
-                  Promo code
-                </p>
+                <p className="font-mono-label text-[10px] text-[#F7F5F0]/60">Promo code</p>
               </div>
               {appliedCoupon ? (
-                <div
-                  data-testid="coupon-applied"
-                  className="mt-3 flex items-center justify-between gap-2 rounded-sm border border-[#284226] bg-[#284226]/40 px-3 py-2.5"
-                >
+                <div data-testid="coupon-applied" className="mt-3 flex items-center justify-between gap-2 rounded-sm border border-[#284226] bg-[#284226]/40 px-3 py-2.5">
                   <div className="min-w-0">
-                    <p
-                      className="font-display text-sm font-bold tracking-tight text-[#F7F5F0]"
-                      data-testid="coupon-applied-code"
-                    >
+                    <p className="font-display text-sm font-bold tracking-tight text-[#F7F5F0]" data-testid="coupon-applied-code">
                       {appliedCoupon.code}
                     </p>
-                    <p className="text-[11px] text-[#F7F5F0]/70 truncate">
-                      {appliedCoupon.description}
-                    </p>
+                    <p className="text-[11px] text-[#F7F5F0]/70 truncate">{appliedCoupon.description}</p>
                   </div>
                   <button
                     type="button"
@@ -999,7 +915,6 @@ const BookPickup = () => {
                       setCouponInput(e.target.value.toUpperCase());
                       if (couponError) setCouponError("");
                     }}
-                    onKeyDown={(e) => e.key === "Enter" && applyCoupon()}
                     placeholder="ENTER CODE"
                     data-testid="coupon-input"
                     className="h-10 rounded-sm bg-[#F7F5F0]/5 border-[#F7F5F0]/20 text-[#F7F5F0] placeholder:text-[#F7F5F0]/40 focus-visible:ring-[#C45B38] uppercase tracking-wider"
@@ -1015,10 +930,7 @@ const BookPickup = () => {
                 </div>
               )}
               {couponError && (
-                <p
-                  data-testid="coupon-error"
-                  className="mt-2 text-xs text-[#C45B38]"
-                >
+                <p data-testid="coupon-error" className="mt-2 text-xs text-[#C45B38]">
                   {couponError}
                 </p>
               )}
@@ -1028,35 +940,20 @@ const BookPickup = () => {
             <div className="mt-8 border-t border-[#F7F5F0]/15 pt-6 space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-[#F7F5F0]/60">Pickup fee</span>
-                <span
-                  data-testid="summary-fee"
-                  className={
-                    discount > 0
-                      ? "text-[#F7F5F0]/60 line-through"
-                      : "text-[#F7F5F0]"
-                  }
-                >
+                <span data-testid="summary-fee" className={discount > 0 ? "text-[#F7F5F0]/60 line-through" : "text-[#F7F5F0]"}>
                   ₹{BASE_FEE}
                 </span>
               </div>
               {discount > 0 && (
-                <div
-                  className="flex justify-between text-sm"
-                  data-testid="summary-discount-row"
-                >
+                <div className="flex justify-between text-sm" data-testid="summary-discount-row">
                   <span className="text-[#F7F5F0]/60">Discount</span>
                   <span className="text-[#C45B38]">− ₹{discount}</span>
                 </div>
               )}
               <div className="flex items-end justify-between pt-2">
                 <div>
-                  <p className="font-mono-label text-[10px] text-[#F7F5F0]/60">
-                    Total
-                  </p>
-                  <p
-                    className="font-display text-3xl font-black tracking-tight"
-                    data-testid="summary-total"
-                  >
+                  <p className="font-mono-label text-[10px] text-[#F7F5F0]/60">Total</p>
+                  <p className="font-display text-3xl font-black tracking-tight" data-testid="summary-total">
                     ₹{total}
                   </p>
                 </div>
@@ -1078,30 +975,22 @@ const BookPickup = () => {
               <ArrowRight size={16} />
             </button>
             <p className="mt-3 text-[11px] leading-relaxed text-[#F7F5F0]/50">
-              You won&apos;t be charged until our partner arrives. Cancel
-              anytime before the slot opens.
+              You won&apos;t be charged until our partner arrives. Cancel anytime before the slot opens.
             </p>
           </div>
         </aside>
       </form>
 
-      {/* Confirmation / Success dialog */}
+      {/* Confirm / Success dialog */}
       <Dialog open={confirmOpen} onOpenChange={handleDialogChange}>
         <DialogContent
-          data-testid={
-            dialogStep === "success"
-              ? "booking-success-dialog"
-              : "booking-confirm-dialog"
-          }
+          data-testid={dialogStep === "success" ? "booking-success-dialog" : "booking-confirm-dialog"}
           className="rounded-sm border-[#D1CDBC] bg-[#F7F5F0] max-w-md p-6"
         >
-          {/* ── Review step ── */}
-          {dialogStep === "review" && (
+          {dialogStep === "review" ? (
             <>
               <DialogHeader className="text-left space-y-1.5">
-                <p className="font-mono-label text-xs text-[#596155]">
-                  Confirm booking
-                </p>
+                <p className="font-mono-label text-xs text-[#596155]">Confirm booking</p>
                 <DialogTitle className="font-display text-2xl font-black tracking-tight text-[#121710]">
                   Ready to lock this in?
                 </DialogTitle>
@@ -1115,18 +1004,13 @@ const BookPickup = () => {
                   selectedSlot={selectedSlot}
                   selectedAddress={selectedAddress}
                   notes={notes}
-                  imageCount={images.length}
+                  images={images}
                   couponCode={appliedCoupon?.code}
                   discount={discount}
                 />
                 <div className="mt-4 flex items-center justify-between">
-                  <p className="font-mono-label text-[10px] text-[#596155]">
-                    Total
-                  </p>
-                  <p
-                    className="font-display text-2xl font-black tracking-tight text-[#121710]"
-                    data-testid="confirm-modal-total"
-                  >
+                  <p className="font-mono-label text-[10px] text-[#596155]">Total</p>
+                  <p className="font-display text-2xl font-black tracking-tight text-[#121710]" data-testid="confirm-modal-total">
                     ₹{total}
                   </p>
                 </div>
@@ -1135,46 +1019,34 @@ const BookPickup = () => {
                 <button
                   type="button"
                   onClick={() => setConfirmOpen(false)}
+                  disabled={confirming}
                   data-testid="confirm-cancel-btn"
-                  className="flex-1 rounded-sm border border-[#121710] px-4 py-3 text-sm font-medium text-[#121710] hover:bg-[#121710] hover:text-[#F7F5F0] transition-colors"
+                  className="flex-1 rounded-sm border border-[#121710] px-4 py-3 text-sm font-medium text-[#121710] hover:bg-[#121710] hover:text-[#F7F5F0] transition-colors disabled:opacity-60"
                 >
                   Back
                 </button>
                 <button
                   type="button"
                   onClick={confirmBooking}
+                  disabled={confirming}
                   data-testid="confirm-book-btn"
-                  className="flex-1 rounded-sm bg-[#284226] px-4 py-3 text-sm font-medium text-[#F7F5F0] hover:bg-[#1C2E1A] transition-colors"
+                  className="flex-1 inline-flex items-center justify-center gap-2 rounded-sm bg-[#284226] px-4 py-3 text-sm font-medium text-[#F7F5F0] hover:bg-[#1C2E1A] transition-colors disabled:opacity-60"
                 >
-                  Confirm pickup
+                  {confirming ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      {images.length > 0 ? "Uploading…" : "Confirming…"}
+                    </>
+                  ) : (
+                    "Confirm pickup"
+                  )}
                 </button>
               </DialogFooter>
             </>
-          )}
-
-          {/* ── Uploading / inserting step ── */}
-          {dialogStep === "submitting" && (
-            <div className="py-10 flex flex-col items-center gap-4 text-center">
-              <Loader2 size={32} className="animate-spin text-[#284226]" />
-              <p className="font-display text-lg font-bold text-[#121710]">
-                {images.length > 0
-                  ? "Uploading photos & saving your booking…"
-                  : "Saving your booking…"}
-              </p>
-              <p className="text-sm text-[#596155]">
-                This will only take a moment.
-              </p>
-            </div>
-          )}
-
-          {/* ── Success step ── */}
-          {dialogStep === "success" && (
+          ) : (
             <div data-testid="booking-success">
               <DialogHeader className="text-left space-y-1.5">
-                <p
-                  className="font-mono-label text-xs text-[#284226] flex items-center gap-2"
-                  data-testid="booking-success-id"
-                >
+                <p className="font-mono-label text-xs text-[#284226] flex items-center gap-2" data-testid="booking-success-id">
                   <Check size={12} />
                   Pickup confirmed · {bookingId}
                 </p>
@@ -1187,10 +1059,7 @@ const BookPickup = () => {
                     {date && format(date, "EEEE, d MMM")}
                   </span>{" "}
                   between{" "}
-                  <span className="text-[#121710] font-medium">
-                    {selectedSlot?.range}
-                  </span>
-                  .
+                  <span className="text-[#121710] font-medium">{selectedSlot?.range}</span>.
                 </DialogDescription>
               </DialogHeader>
               <div className="mt-5 border-y border-[#D1CDBC] py-4">
@@ -1199,46 +1068,30 @@ const BookPickup = () => {
                   selectedSlot={selectedSlot}
                   selectedAddress={selectedAddress}
                   notes={notes}
-                  imageCount={images.length}
+                  images={images}
                   couponCode={appliedCoupon?.code}
                   discount={discount}
                 />
                 <div className="mt-4 flex items-center justify-between">
-                  <p className="font-mono-label text-[10px] text-[#596155]">
-                    Charged
-                  </p>
-                  <p
-                    className="font-display text-2xl font-black tracking-tight text-[#121710]"
-                    data-testid="success-modal-total"
-                  >
+                  <p className="font-mono-label text-[10px] text-[#596155]">Charged</p>
+                  <p className="font-display text-2xl font-black tracking-tight text-[#121710]" data-testid="success-modal-total">
                     ₹{total}
                   </p>
                 </div>
               </div>
               <div className="mt-5">
-                <p className="font-mono-label text-[10px] text-[#596155]">
-                  What happens next
-                </p>
+                <p className="font-mono-label text-[10px] text-[#596155]">What happens next</p>
                 <ol className="mt-3 space-y-2 text-sm text-[#121710]">
                   <li className="flex gap-2">
-                    <Sparkles
-                      size={14}
-                      className="text-[#C45B38] mt-0.5 shrink-0"
-                    />
+                    <Sparkles size={14} className="text-[#C45B38] mt-0.5 shrink-0" />
                     SMS confirmation sent to your phone now.
                   </li>
                   <li className="flex gap-2">
-                    <Sparkles
-                      size={14}
-                      className="text-[#C45B38] mt-0.5 shrink-0"
-                    />
+                    <Sparkles size={14} className="text-[#C45B38] mt-0.5 shrink-0" />
                     Partner name &amp; live location 30 min before pickup.
                   </li>
                   <li className="flex gap-2">
-                    <Sparkles
-                      size={14}
-                      className="text-[#C45B38] mt-0.5 shrink-0"
-                    />
+                    <Sparkles size={14} className="text-[#C45B38] mt-0.5 shrink-0" />
                     Receipt with weight &amp; recycling impact, post-pickup.
                   </li>
                 </ol>
@@ -1249,7 +1102,7 @@ const BookPickup = () => {
                   onClick={() => {
                     const id = bookingId;
                     closeAndReset();
-                    router.push(`/dashboard/pickups/${id}`);
+                    if (id) router.push(`/pickups/${id}`);
                   }}
                   data-testid="booking-success-view-btn"
                   className="flex-1 rounded-sm border border-[#121710] px-4 py-3 text-sm font-medium text-[#121710] hover:bg-[#121710] hover:text-[#F7F5F0] transition-colors"
@@ -1278,5 +1131,18 @@ const BookPickup = () => {
     </div>
   );
 };
+
+// ─── Utility: data/blob URL → File (for camera captures) ─────────────────────
+
+function dataUrlToFile(url: string, filename: string, mimeType: string): File {
+  // blob: URL — can't synchronously convert; caller should pass File directly.
+  // This path is only hit for camera captures that already produced a data URL.
+  const arr = url.split(",");
+  const bstr = atob(arr[1] ?? "");
+  const n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  for (let i = 0; i < n; i++) u8arr[i] = bstr.charCodeAt(i);
+  return new File([u8arr], filename, { type: mimeType });
+}
 
 export default BookPickup;
