@@ -107,12 +107,14 @@ type DialogStep = "review" | "success";
 // Keep these client-side; they don't need a DB round-trip.
 
 const TIME_SLOTS: TimeSlot[] = [
-  { id: "slot_8_10",  range: "8 AM – 10 AM",  label: "Morning" },
-  { id: "slot_10_12", range: "10 AM – 12 PM", label: "Late Morning" },
-  { id: "slot_12_14", range: "12 PM – 2 PM",  label: "Noon" },
-  { id: "slot_14_16", range: "2 PM – 4 PM",   label: "Afternoon" },
-  { id: "slot_16_18", range: "4 PM – 6 PM",   label: "Evening" },
-  { id: "slot_18_20", range: "6 PM – 8 PM",   label: "Late Evening" },
+  // { id: "slot_8_10",  range: "8 AM – 10 AM",  label: "Morning" },
+  // { id: "slot_10_12", range: "10 AM – 12 PM", label: "Late Morning" },
+  // { id: "slot_12_14", range: "12 PM – 2 PM",  label: "Noon" },
+  // { id: "slot_14_16", range: "2 PM – 4 PM",   label: "Afternoon" },
+  // { id: "slot_16_18", range: "4 PM – 6 PM",   label: "Evening" },
+  // { id: "slot_18_20", range: "6 PM – 8 PM",   label: "Late Evening" },
+  { id: "slot_8_12", range: "8 AM - 12 PM",   label: "Morning" },
+  { id: "slot_18_22", range: "6 PM - 10 PM",   label: "Evening" },
 ];
 
 // ─── S3 image upload via API route ───────────────────────────────────────────
