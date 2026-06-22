@@ -526,13 +526,14 @@ const BookPickup = () => {
       }
 
       // 4. Insert a pending payment row
-      await supabase.from("payments").insert({
+      const { error: paymentInsertError } = await supabase.from("payments").insert({
         pickup_id: pickup.id,
         customer_id: user.id,
         amount: total,
         currency: "INR",
         status: "pending",
       });
+      if (paymentInsertError) throw paymentInsertError;
 
       setBookingId(pickup.pickup_id);
       clearDraft();

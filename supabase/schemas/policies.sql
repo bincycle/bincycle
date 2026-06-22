@@ -157,9 +157,9 @@ create policy "payments: read own or admin"
   on payments for select
   using (customer_id = auth.uid() or get_my_role() = 'admin');
 
-create policy "payments: insert admin only"
+create policy "payments: insert own"
   on payments for insert
-  with check (get_my_role() = 'admin');
+  with check (customer_id = auth.uid() or get_my_role() = 'admin');
 
 create policy "payments: update admin only"
   on payments for update
