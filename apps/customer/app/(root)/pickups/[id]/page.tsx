@@ -48,12 +48,14 @@ interface Pickup extends PickupForTimeline {
 }
 
 const SLOT_RANGES: Record<string, { range: string; label: string }> = {
-    slot_8_10: { range: "8 AM – 10 AM", label: "Morning" },
-    slot_10_12: { range: "10 AM – 12 PM", label: "Late Morning" },
-    slot_12_14: { range: "12 PM – 2 PM", label: "Noon" },
-    slot_14_16: { range: "2 PM – 4 PM", label: "Afternoon" },
-    slot_16_18: { range: "4 PM – 6 PM", label: "Evening" },
-    slot_18_20: { range: "6 PM – 8 PM", label: "Late Evening" },
+    // slot_8_10: { range: "8 AM – 10 AM", label: "Morning" },
+    // slot_10_12: { range: "10 AM – 12 PM", label: "Late Morning" },
+    // slot_12_14: { range: "12 PM – 2 PM", label: "Noon" },
+    // slot_14_16: { range: "2 PM – 4 PM", label: "Afternoon" },
+    // slot_16_18: { range: "4 PM – 6 PM", label: "Evening" },
+    // slot_18_20: { range: "6 PM – 8 PM", label: "Late Evening" },
+    slot_8_12: { range: "8 AM – 12 PM", label: "Morning" },
+    slot_18_22: { range: "6 PM – 10 PM", label: "Evening" },
 };
 
 const STATUS_META: Record<string, { label: string; chip: string; dot: string }> = {
