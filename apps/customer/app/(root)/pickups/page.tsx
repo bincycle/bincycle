@@ -80,12 +80,13 @@ const isUpcoming = (p: Pickup) => !TERMINAL_STATUSES.has(p.status);
 
 // Static slot label lookup — slot IDs map to fixed ranges set in the booking flow
 const SLOT_RANGES: Record<string, string> = {
-    slot_8_10: "8 AM – 10 AM",
-    slot_10_12: "10 AM – 12 PM",
-    slot_12_14: "12 PM – 2 PM",
-    slot_14_16: "2 PM – 4 PM",
-    slot_16_18: "4 PM – 6 PM",
-    slot_18_20: "6 PM – 8 PM",
+    slot_8_12: "8 AM – 12 PM",
+    slot_18_22: "6 PM – 10 PM",
+    // slot_10_12: "10 AM – 12 PM",
+    // slot_12_14: "12 PM – 2 PM",
+    // slot_14_16: "2 PM – 4 PM",
+    // slot_16_18: "4 PM – 6 PM",
+    // slot_18_20: "6 PM – 8 PM",
 };
 
 // ─── StatusBadge ──────────────────────────────────────────────────────────────
