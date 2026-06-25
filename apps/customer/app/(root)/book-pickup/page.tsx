@@ -58,14 +58,10 @@ const TIME_SLOTS = [
 
 type SlotId = (typeof TIME_SLOTS)[number]["id"];
 
-/** Returns true if the given slot is currently in progress (only relevant when date is today). */
-function isSlotCurrentlyRunning(slotStartHour: number, slotEndHour: number): boolean {
-  const now = new Date();
-  const h = now.getHours();
-  return h >= slotStartHour && h < slotEndHour;
-}
-
-/** Returns true if the slot should be disabled for the selected date. */
+/**
+ * Returns true if the slot should be disabled for the selected date.
+ * Disabled when date is today AND the slot has already started (in progress or fully past).
+ */
 function isSlotDisabled(
   slotStartHour: number,
   slotEndHour: number,
@@ -74,7 +70,10 @@ function isSlotDisabled(
   if (!selectedDate) return false;
   const todayMidnight = today();
   const isToday = selectedDate.getTime() === todayMidnight.getTime();
-  return isToday && isSlotCurrentlyRunning(slotStartHour, slotEndHour);
+  if (!isToday) return false;
+  const currentHour = new Date().getHours();
+  // Disable if the slot has already started (in progress) or has fully passed
+  return currentHour >= slotStartHour;
 }
 
 const today = () => {
@@ -706,7 +705,7 @@ const BookPickup = () => {
                   >
                     <p className="font-display text-lg font-bold tracking-tight">{s.range}</p>
                     <p className={`mt-1 text-xs ${active ? "text-[#F7F5F0]/70" : disabled ? "text-[#596155]/40" : "text-[#596155]"}`}>
-                      {disabled ? "Slot in progress" : s.label}
+                      {disabled ? (new Date().getHours() >= s.endHour ? "Slot passed" : "Slot in progress") : s.label}
                     </p>
                   </button>
                 );
