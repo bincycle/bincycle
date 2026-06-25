@@ -102,8 +102,7 @@ export default function RegisterPage() {
         if (!form.name.trim()) e.name = "Please tell us your name.";
         if (!form.email) e.email = "Email is required.";
         else if (!emailRe.test(form.email)) e.email = "Please enter a valid email.";
-        if (!form.phone) e.phone = "Phone number is required.";
-        else if (!phoneRe.test(form.phone))
+        if (form.phone && !phoneRe.test(form.phone))
             e.phone = "That doesn't look like a valid phone number.";
         if (!form.password) e.password = "Password is required.";
         else if (form.password.length < 8) e.password = "Use at least 8 characters.";
@@ -140,7 +139,7 @@ export default function RegisterPage() {
                 // Access later via: supabase.auth.getUser() → user.user_metadata
                 data: {
                     full_name: form.name.trim(),
-                    phone: form.phone.trim(),
+                    ...(form.phone ? { phone: form.phone.trim() } : {}),
                 },
                 // Supabase will redirect here after the user clicks the
                 // confirmation link. Adjust to match your app's flow.
@@ -243,7 +242,7 @@ export default function RegisterPage() {
                     </div>
                     <div>
                         <Label htmlFor="phone" className="font-mono-label text-xs text-[#596155]">
-                            Phone
+                            Phone (optional)
                         </Label>
                         <Input
                             id="phone"
