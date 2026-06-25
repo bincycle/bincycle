@@ -131,7 +131,19 @@ create policy "pickups: read"
 create policy "pickups: insert"
   on pickups for insert
   with check (
-    (get_my_role() = 'customer' and customer_id = auth.uid())
+    (
+      get_my_role() = 'customer'
+      and customer_id = auth.uid()
+      and exists (
+        select 1 from addresses
+        where addresses.id = address_id
+          and (
+            pincode like '560%'
+            or pincode like '561%'
+            or pincode like '562%'
+          )
+      )
+    )
     or get_my_role() = 'admin'
   );
 

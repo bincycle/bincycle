@@ -56,6 +56,8 @@ const TIME_SLOTS = [
   { id: "evening", range: "6 PM – 10 PM", label: "Evening slot", startHour: 18, endHour: 22 },
 ] as const;
 
+const ALLOWED_PINCODE_PREFIXES = ["560", "561", "562"];
+
 type SlotId = (typeof TIME_SLOTS)[number]["id"];
 
 /**
@@ -283,6 +285,12 @@ const BookPickup = () => {
   const selectedAddress = addresses.find((a) => a.id === addressId);
   const selectedSlot = TIME_SLOTS.find((s) => s.id === slotId);
 
+  const isPincodeServiceable = useMemo(() => {
+    if (!selectedAddress) return false;
+    const pin = selectedAddress.pincode.trim();
+    return ALLOWED_PINCODE_PREFIXES.some((prefix) => pin.startsWith(prefix));
+  }, [selectedAddress]);
+
   // Clear the selected slot if it becomes disabled when the date changes to today
   useEffect(() => {
     if (slotId) {
@@ -474,7 +482,7 @@ const BookPickup = () => {
 
   // ─── Submit ────────────────────────────────────────────────────────────────
 
-  const canSubmit = !!(date && slotId && addressId);
+  const canSubmit = !!(date && slotId && addressId && isPincodeServiceable);
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -739,6 +747,9 @@ const BookPickup = () => {
               <div role="radiogroup" data-testid="address-group" className="space-y-2">
                 {addresses.map((a) => {
                   const active = a.id === addressId;
+                  const isServiceable = ALLOWED_PINCODE_PREFIXES.some((prefix) =>
+                    a.pincode.trim().startsWith(prefix)
+                  );
                   return (
                     <button
                       key={a.id}
@@ -749,18 +760,34 @@ const BookPickup = () => {
                       onClick={() => setAddressId(a.id)}
                       className={`w-full text-left rounded-sm border px-4 py-3 transition-all ${
                         active
-                          ? "border-[#284226] bg-[#EDE9DC]"
+                          ? isServiceable
+                            ? "border-[#284226] bg-[#EDE9DC]"
+                            : "border-[#C45B38] bg-[#FDF2F0]"
                           : "border-[#D1CDBC] bg-[#F7F5F0] hover:border-[#284226]"
                       }`}
                     >
-                      <p className="font-medium text-sm text-[#121710]">{a.label ?? "Address"}</p>
-                      <p className="text-xs text-[#596155] mt-0.5">
-                        {a.address_line1}{a.address_line2 ? `, ${a.address_line2}` : ""}, {a.city} — {a.pincode}
-                      </p>
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-medium text-sm text-[#121710]">{a.label ?? "Address"}</p>
+                          <p className="text-xs text-[#596155] mt-0.5">
+                            {a.address_line1}{a.address_line2 ? `, ${a.address_line2}` : ""}, {a.city} — {a.pincode}
+                          </p>
+                        </div>
+                        {!isServiceable && (
+                          <span className="text-[10px] font-mono-label font-bold text-[#C45B38] bg-[#FDF2F0] px-2 py-0.5 rounded-sm border border-[#C45B38]/30">
+                            UNSERVICEABLE
+                          </span>
+                        )}
+                      </div>
                     </button>
                   );
                 })}
               </div>
+            )}
+            {selectedAddress && !isPincodeServiceable && (
+              <p className="mt-3 text-xs text-[#C45B38] font-medium flex items-center gap-1.5">
+                ⚠️ We only support pickups in pincodes starting with 560, 561, or 562 (Bengaluru region).
+              </p>
             )}
           </section>
 
