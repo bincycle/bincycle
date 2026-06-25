@@ -53,7 +53,7 @@ export const MarketingNav = () => {
 
         <div className="hidden md:flex md:items-center md:gap-2">
           <Link
-            href="/login"
+            href="https://customer.bincycle.in/login"
             data-testid="nav-signin-link"
             className="px-3 py-2 text-sm text-[#596155] hover:text-[#121710] transition-colors"
           >
@@ -104,7 +104,7 @@ export const MarketingNav = () => {
               </Link>
             ))}
             <Link
-              href="/login"
+              href="https://customer.bincycle.in/login"
               onClick={() => setOpen(false)}
               data-testid="nav-mobile-signin"
               className="mt-2 inline-flex items-center justify-between rounded-sm border border-[#121710] px-4 py-3 text-sm font-medium text-[#121710] hover:bg-[#121710] hover:text-[#F7F5F0]"

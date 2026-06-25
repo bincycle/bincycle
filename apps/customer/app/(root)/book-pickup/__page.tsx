@@ -52,30 +52,11 @@ const MAX_IMAGE_MB = 5;
 const STORAGE_BUCKET = "pickup-images";
 
 const TIME_SLOTS = [
-  { id: "morning", range: "8 AM – 12 PM", label: "Morning slot", startHour: 8, endHour: 12 },
-  { id: "evening", range: "6 PM – 10 PM", label: "Evening slot", startHour: 18, endHour: 22 },
+  { id: "morning", range: "8 AM – 12 PM", label: "Morning slot" },
+  { id: "evening", range: "6 PM – 10 PM", label: "Evening slot" },
 ] as const;
 
 type SlotId = (typeof TIME_SLOTS)[number]["id"];
-
-/** Returns true if the given slot is currently in progress (only relevant when date is today). */
-function isSlotCurrentlyRunning(slotStartHour: number, slotEndHour: number): boolean {
-  const now = new Date();
-  const h = now.getHours();
-  return h >= slotStartHour && h < slotEndHour;
-}
-
-/** Returns true if the slot should be disabled for the selected date. */
-function isSlotDisabled(
-  slotStartHour: number,
-  slotEndHour: number,
-  selectedDate: Date | undefined,
-): boolean {
-  if (!selectedDate) return false;
-  const todayMidnight = today();
-  const isToday = selectedDate.getTime() === todayMidnight.getTime();
-  return isToday && isSlotCurrentlyRunning(slotStartHour, slotEndHour);
-}
 
 const today = () => {
   const d = new Date();
@@ -283,16 +264,6 @@ const BookPickup = () => {
 
   const selectedAddress = addresses.find((a) => a.id === addressId);
   const selectedSlot = TIME_SLOTS.find((s) => s.id === slotId);
-
-  // Clear the selected slot if it becomes disabled when the date changes to today
-  useEffect(() => {
-    if (slotId) {
-      const slot = TIME_SLOTS.find((s) => s.id === slotId);
-      if (slot && isSlotDisabled(slot.startHour, slot.endHour, date)) {
-        setSlotId(null);
-      }
-    }
-  }, [date, slotId]);
 
   // ── Fetch user + addresses on mount ───────────────────────────────────────
   useEffect(() => {
@@ -685,28 +656,23 @@ const BookPickup = () => {
             <div role="radiogroup" data-testid="timeslot-group" className="grid grid-cols-2 gap-3">
               {TIME_SLOTS.map((s) => {
                 const active = s.id === slotId;
-                const disabled = isSlotDisabled(s.startHour, s.endHour, date);
                 return (
                   <button
                     key={s.id}
                     type="button"
                     role="radio"
                     aria-checked={active}
-                    aria-disabled={disabled}
-                    disabled={disabled}
                     data-testid={`timeslot-${s.id}`}
-                    onClick={() => !disabled && setSlotId(s.id)}
+                    onClick={() => setSlotId(s.id)}
                     className={`rounded-sm border p-5 text-left transition-all ${
-                      disabled
-                        ? "border-[#D1CDBC] bg-[#F7F5F0] text-[#596155]/40 cursor-not-allowed opacity-50"
-                        : active
+                      active
                         ? "border-[#284226] bg-[#284226] text-[#F7F5F0]"
                         : "border-[#D1CDBC] bg-[#F7F5F0] text-[#121710] hover:border-[#284226]"
                     }`}
                   >
                     <p className="font-display text-lg font-bold tracking-tight">{s.range}</p>
-                    <p className={`mt-1 text-xs ${active ? "text-[#F7F5F0]/70" : disabled ? "text-[#596155]/40" : "text-[#596155]"}`}>
-                      {disabled ? "Slot in progress" : s.label}
+                    <p className={`mt-1 text-xs ${active ? "text-[#F7F5F0]/70" : "text-[#596155]"}`}>
+                      {s.label}
                     </p>
                   </button>
                 );
