@@ -641,7 +641,7 @@ const BookPickup = () => {
             </Popover>
             <p className="mt-3 text-xs text-[#596155]">
               Bookings open for the next 7 days. Need something further out?{" "}
-              <span className="text-[#C45B38]">Switch to a Weekly plan.</span>
+              <span className="text-[#C45B38]">Switch to a Monthly subscription.</span>
             </p>
           </section>
 

@@ -520,7 +520,7 @@ export const GuideClient = () => {
               Looking for a fixed subscription?
             </h3>
             <p className="mt-2 text-sm text-[#596155] max-w-xl leading-relaxed">
-              If you have recurrent daily trash pickups, save more by subscribing to our Pro or Max monthly plans with set weight thresholds.
+              If you have recurrent daily trash pickups, save more by subscribing to our Upto 20kg or Upto 40kg monthly plans with set weight thresholds.
             </p>
           </div>
           <Link

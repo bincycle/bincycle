@@ -46,7 +46,7 @@ import CameraCaptureDialog, {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const BASE_FEE = 149;
+const BASE_FEE = 49;
 const MAX_IMAGES = 4;
 const MAX_IMAGE_MB = 5;
 const STORAGE_BUCKET = "pickup-images"; // your Supabase Storage bucket name
@@ -655,7 +655,7 @@ const BookPickup = () => {
             </Popover>
             <p className="mt-3 text-xs text-[#596155]">
               Bookings open for the next 7 days. Need something further out?{" "}
-              <span className="text-[#C45B38]">Switch to a Weekly plan.</span>
+              <span className="text-[#C45B38]">Switch to a Monthly subscription.</span>
             </p>
           </section>
 

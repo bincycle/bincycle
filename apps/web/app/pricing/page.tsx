@@ -9,19 +9,19 @@ interface ComparisonRow {
 }
 
 const comparisons: ComparisonRow[] = [
-  { feature: "Pickups per month", values: ["1 (on-demand)", "4", "8"] },
+  { feature: "Pickups per month", values: ["1 (on-demand)", "4", "4", "Custom"] },
   {
     feature: "Bag/weight limit",
-    values: ["Up to 25 kg", "Up to 40 kg / pickup", "Unlimited"],
+    values: ["Up to 100 kg", "Up to 20 kg", "Up to 40 kg", "Unlimited"],
   },
-  { feature: "Priority slot booking", values: ["—", "Yes", "Yes"] },
-  { feature: "Recurring schedule", values: ["—", "Yes", "Yes"] },
+  { feature: "Priority slot booking", values: ["—", "Yes", "Yes", "Dedicated slot"] },
+  { feature: "Recurring schedule", values: ["—", "Yes", "Yes", "Custom frequency"] },
   {
     feature: "E-waste & bulky items",
-    values: ["Add-on", "Add-on", "Included"],
+    values: ["Add-on", "Add-on", "Add-on", "Included"],
   },
-  { feature: "Monthly impact report", values: ["—", "—", "Yes"] },
-  { feature: "Dedicated partner", values: ["—", "—", "Yes"] },
+  { feature: "Monthly impact report", values: ["—", "Yes", "Yes", "ESG Audit Dashboard"] },
+  { feature: "Dedicated partner", values: ["—", "—", "—", "Yes (Account Manager)"] },
 ];
 
 interface FaqItem {
@@ -69,7 +69,7 @@ export default function PricingPage() {
 
       {/* PRICING CARDS */}
       <section className="mx-auto max-w-7xl px-5 sm:px-8 pb-24">
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {pricingPlans.map((plan, i) => (
             <SectionReveal
               key={plan.id}
@@ -123,7 +123,7 @@ export default function PricingPage() {
                 ))}
               </ul>
               <Link
-                href="https://customer.bincycle.in/book-pickup"
+                href={plan.id === "business" ? "/contact" : "https://customer.bincycle.in/book-pickup"}
                 data-testid={`pricing-cta-${plan.id}`}
                 className={`mt-8 inline-flex items-center justify-center rounded-sm px-5 py-3.5 text-sm font-medium transition-colors ${
                   plan.accent
