@@ -106,9 +106,11 @@ export const pricingPlans: PricingPlan[] = [
         features: [
             "Daily or custom pickup frequencies",
             "No weight limits",
+            "Custom waste-sorting stations & color-coded bins",
             "Dedicated account manager & route partner",
             "Monthly ESG & recycling impact audit",
             "E-waste, bulk, and hazardous waste solutions",
+            "Zero-landfill compliance certification",
         ],
         ctaLabel: "Get a quote",
         accent: false,
