@@ -9,10 +9,10 @@ interface ComparisonRow {
 }
 
 const comparisons: ComparisonRow[] = [
-  { feature: "Pickups per month", values: ["1 (on-demand)", "4", "4", "Custom"] },
+  { feature: "Pickups per month", values: ["1 (on-demand)", "4", "8", "Custom"] },
   {
     feature: "Bag/weight limit",
-    values: ["Up to 100 kg", "Up to 20 kg", "Up to 40 kg", "Unlimited"],
+    values: ["Up to 100 kg", "Up to 20 kg per pickup", "Up to 40 kg per pickup", "Unlimited"],
   },
   { feature: "Priority slot booking", values: ["—", "Yes", "Yes", "Dedicated slot"] },
   { feature: "Recurring schedule", values: ["—", "Yes", "Yes", "Custom frequency"] },

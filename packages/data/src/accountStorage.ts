@@ -235,8 +235,8 @@ export const billingPlan: BillingPlan = {
         d.setDate(d.getDate() + 12);
         return d.toISOString();
     })(),
-    bagsRemaining: 3,
-    bagsTotal: 4,
+    bagsRemaining: 6,
+    bagsTotal: 8,
 };
 
 export const mockPaymentMethods: PaymentMethod[] = [

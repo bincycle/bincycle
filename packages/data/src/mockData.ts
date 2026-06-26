@@ -73,7 +73,7 @@ export const pricingPlans: PricingPlan[] = [
         tagline: "Standard monthly subscription for small households.",
         features: [
             "4 pickups / month (weekly)",
-            "Up to 20 kg total monthly weight limit",
+            "Up to 20 kg weight limit per pickup",
             "Priority slot booking",
             "Recurring schedule, change anytime",
             "Free missed-pickup reschedule",
@@ -88,8 +88,8 @@ export const pricingPlans: PricingPlan[] = [
         cadence: "per month",
         tagline: "The neighborhood favorite. Double the capacity.",
         features: [
-            "4 pickups / month (weekly)",
-            "Up to 40 kg total monthly weight limit",
+            "8 pickups / month (twice weekly)",
+            "Up to 40 kg weight limit per pickup",
             "Priority slot booking",
             "Recurring schedule, change anytime",
             "Free missed-pickup reschedule",
