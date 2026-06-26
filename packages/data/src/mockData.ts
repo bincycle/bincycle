@@ -105,7 +105,7 @@ export const pricingPlans: PricingPlan[] = [
         tagline: "Tailored waste management for offices, cafes, and large societies.",
         features: [
             "Daily or custom pickup frequencies",
-            "No monthly weight limits",
+            "No weight limits",
             "Dedicated account manager & route partner",
             "Monthly ESG & recycling impact audit",
             "E-waste, bulk, and hazardous waste solutions",
