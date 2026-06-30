@@ -17,7 +17,7 @@ const cols: FooterCol[] = [
     title: "Product",
     links: [
       { to: "/pricing", label: "Pricing" },
-      { to: "/pricing-guide", label: "Pricing Guide" },
+      // { to: "/pricing-guide", label: "Pricing Guide" },
       { to: "https://customer.bincycle.in/book-pickup", label: "Book a pickup" },
       { to: "/help", label: "Help center" },
     ],

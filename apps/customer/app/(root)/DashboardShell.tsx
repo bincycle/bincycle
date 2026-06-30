@@ -130,7 +130,7 @@ export function DashboardSidebar({
         <ul className="space-y-1">
           <li>
             <Link
-              href="/help"
+              href="https://bincycle.in/help"
               data-testid="sidebar-link-help"
               className="flex items-center gap-3 rounded-sm px-3 py-2.5 text-sm text-[#121710] hover:bg-[#EDE9DC]"
             >
@@ -139,7 +139,7 @@ export function DashboardSidebar({
           </li>
           <li>
             <Link
-              href="/"
+              href="https://bincycle.in"
               data-testid="sidebar-link-home"
               className="flex items-center gap-3 rounded-sm px-3 py-2.5 text-sm text-[#121710] hover:bg-[#EDE9DC]"
             >

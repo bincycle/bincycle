@@ -12,14 +12,14 @@ const offices: Office[] = [
     city: "Bengaluru — HQ",
     addr: "WeWork Galaxy, 43 Residency Rd, Bengaluru 560025",
   },
-  {
-    city: "Mumbai",
-    addr: "BKC Annex, Bandra-Kurla Complex, Mumbai 400051",
-  },
-  {
-    city: "Gurugram",
-    addr: "Two Horizon Centre, Sector 43, Gurugram 122002",
-  },
+  // {
+  //   city: "Mumbai",
+  //   addr: "BKC Annex, Bandra-Kurla Complex, Mumbai 400051",
+  // },
+  // {
+  //   city: "Gurugram",
+  //   addr: "Two Horizon Centre, Sector 43, Gurugram 122002",
+  // },
 ];
 
 export default function ContactPage() {
