@@ -10,7 +10,8 @@ interface Office {
 const offices: Office[] = [
   {
     city: "Bengaluru — HQ",
-    addr: "WeWork Galaxy, 43 Residency Rd, Bengaluru 560025",
+    // addr: "WeWork Galaxy, 43 Residency Rd, Bengaluru 560025",
+    addr: "#06, Greenslot Consumer Service Private Limited, Sri Nagar, Doddaballapura, Bengaluru Rural, Karnataka, 561203",
   },
   // {
   //   city: "Mumbai",
