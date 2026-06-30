@@ -56,7 +56,8 @@ const TIME_SLOTS = [
   { id: "evening", range: "6 PM – 10 PM", label: "Evening slot", startHour: 18, endHour: 22 },
 ] as const;
 
-const ALLOWED_PINCODE_PREFIXES = ["560", "561", "562"];
+// const ALLOWED_PINCODE_PREFIXES = ["560", "561", "562"];
+const ALLOWED_PINCODE_PREFIXES = ["560"];
 
 type SlotId = (typeof TIME_SLOTS)[number]["id"];
 
@@ -786,7 +787,7 @@ const BookPickup = () => {
             )}
             {selectedAddress && !isPincodeServiceable && (
               <p className="mt-3 text-xs text-[#C45B38] font-medium flex items-center gap-1.5">
-                ⚠️ We only support pickups in pincodes starting with 560, 561, or 562 (Bengaluru region).
+                ⚠️ We only support pickups in pincodes starting with 560 (Bengaluru region).
               </p>
             )}
           </section>
