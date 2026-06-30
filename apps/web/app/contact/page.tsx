@@ -85,7 +85,7 @@ export default function ContactPage() {
                     data-testid="contact-phone"
                     className="text-[#121710] font-medium hover:text-[#C45B38]"
                   >
-                    +91 80 1234 5678
+                    +91 87 4708 5906
                   </a>
                 </div>
               </div>
