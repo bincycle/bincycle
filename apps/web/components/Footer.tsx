@@ -55,7 +55,7 @@ export const Footer = () => {
             </p>
             <div className="mt-8 flex items-center gap-2">
               <a
-                href="#"
+                href="https://www.instagram.com/bincycle.in"
                 aria-label="Instagram"
                 data-testid="footer-social-instagram"
                 className="rounded-sm border border-[#D1CDBC] p-2.5 text-[#121710] transition-colors hover:bg-[#121710] hover:text-[#F7F5F0]"
@@ -63,7 +63,7 @@ export const Footer = () => {
                 <Instagram size={16} />
               </a>
               <a
-                href="#"
+                href="https://x.com/bincycle_in"
                 aria-label="Twitter"
                 data-testid="footer-social-twitter"
                 className="rounded-sm border border-[#D1CDBC] p-2.5 text-[#121710] transition-colors hover:bg-[#121710] hover:text-[#F7F5F0]"
@@ -71,7 +71,7 @@ export const Footer = () => {
                 <Twitter size={16} />
               </a>
               <a
-                href="#"
+                href="https://www.linkedin.com/in/bincycle-in"
                 aria-label="LinkedIn"
                 data-testid="footer-social-linkedin"
                 className="rounded-sm border border-[#D1CDBC] p-2.5 text-[#121710] transition-colors hover:bg-[#121710] hover:text-[#F7F5F0]"
