@@ -110,6 +110,16 @@ interface AppliedCoupon {
   description: string;
 }
 
+interface AvailableCoupon {
+  id: string;
+  code: string;
+  description: string | null;
+  discount_type: "flat" | "percent";
+  discount_value: number;
+  min_order_amount: number | null;
+  valid_until: string | null;
+}
+
 type SaveStatus = "idle" | "saving" | "saved";
 type DialogStep = "review" | "submitting" | "success";
 
@@ -267,6 +277,8 @@ const BookPickup = () => {
   const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
   const [couponError, setCouponError] = useState("");
   const [couponLoading, setCouponLoading] = useState(false);
+  const [availableCoupons, setAvailableCoupons] = useState<AvailableCoupon[]>([]);
+  const [loadingCoupons, setLoadingCoupons] = useState(true);
 
   // ── Dialog / booking ───────────────────────────────────────────────────────
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -330,6 +342,19 @@ const BookPickup = () => {
       if (error) toast.error("Couldn't load your saved addresses.");
       else setAddresses(addrs ?? []);
       setLoadingAddresses(false);
+
+      setLoadingCoupons(true);
+      const { data: coupons, error: couponsError } = await supabase.rpc(
+        "get_available_coupons",
+      );
+      if (cancelled) return;
+      if (couponsError) {
+        // Non-critical — fail silently, the user can still type a code manually
+        console.error("Couldn't load available coupons:", couponsError);
+      } else {
+        setAvailableCoupons(coupons ?? []);
+      }
+      setLoadingCoupons(false);
     };
     init();
     return () => { cancelled = true; };
@@ -439,9 +464,12 @@ const BookPickup = () => {
    *
    * Expected RPC response shape:
    *   { id, code, discount_type, discount_value, description }
+   *
+   * Pass `codeOverride` to apply a code directly (e.g. tapping one of the
+   * user's available coupons) without requiring it to be typed into the input first.
    */
-  const applyCoupon = async () => {
-    const code = couponInput.trim().toUpperCase();
+  const applyCoupon = async (codeOverride?: string) => {
+    const code = (codeOverride ?? couponInput).trim().toUpperCase();
     if (!code) { setCouponError("Enter a promo code."); return; }
     if (couponLoading) return;
 
@@ -949,29 +977,61 @@ const BookPickup = () => {
                   </button>
                 </div>
               ) : (
-                <div className="flex gap-2">
-                  <Input
-                    value={couponInput}
-                    onChange={(e) => {
-                      setCouponInput(e.target.value.toUpperCase());
-                      if (couponError) setCouponError("");
-                    }}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); applyCoupon(); } }}
-                    placeholder="ENTER CODE"
-                    data-testid="coupon-input"
-                    disabled={couponLoading}
-                    className="h-10 rounded-sm bg-[#F7F5F0]/5 border-[#F7F5F0]/20 text-[#F7F5F0] placeholder:text-[#F7F5F0]/40 focus-visible:ring-[#C45B38] uppercase tracking-wider disabled:opacity-50"
-                  />
-                  <button
-                    type="button"
-                    onClick={applyCoupon}
-                    disabled={couponLoading}
-                    data-testid="coupon-apply-btn"
-                    className="inline-flex items-center justify-center gap-1.5 rounded-sm bg-[#C45B38] px-3 text-xs font-medium text-[#F7F5F0] hover:bg-[#A64A2B] transition-colors disabled:opacity-60"
-                  >
-                    {couponLoading ? <Loader2 size={12} className="animate-spin" /> : "Apply"}
-                  </button>
-                </div>
+                <>
+                  <div className="flex gap-2">
+                    <Input
+                      value={couponInput}
+                      onChange={(e) => {
+                        setCouponInput(e.target.value.toUpperCase());
+                        if (couponError) setCouponError("");
+                      }}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); applyCoupon(); } }}
+                      placeholder="ENTER CODE"
+                      data-testid="coupon-input"
+                      disabled={couponLoading}
+                      className="h-10 rounded-sm bg-[#F7F5F0]/5 border-[#F7F5F0]/20 text-[#F7F5F0] placeholder:text-[#F7F5F0]/40 focus-visible:ring-[#C45B38] uppercase tracking-wider disabled:opacity-50"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => applyCoupon()}
+                      disabled={couponLoading}
+                      data-testid="coupon-apply-btn"
+                      className="inline-flex items-center justify-center gap-1.5 rounded-sm bg-[#C45B38] px-3 text-xs font-medium text-[#F7F5F0] hover:bg-[#A64A2B] transition-colors disabled:opacity-60"
+                    >
+                      {couponLoading ? <Loader2 size={12} className="animate-spin" /> : "Apply"}
+                    </button>
+                  </div>
+
+                  {/* Coupons the user can currently use — tap to apply instantly */}
+                  {!loadingCoupons && availableCoupons.length > 0 && (
+                    <div className="mt-3" data-testid="available-coupons">
+                      <p className="font-mono-label text-[9px] text-[#F7F5F0]/45 mb-2">
+                        Available for you
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {availableCoupons.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => applyCoupon(c.code)}
+                            disabled={couponLoading}
+                            data-testid={`available-coupon-${c.code}`}
+                            className="group flex items-center gap-1.5 rounded-sm border border-[#F7F5F0]/20 bg-[#F7F5F0]/5 px-2.5 py-1.5 text-left transition-colors hover:border-[#C45B38] hover:bg-[#C45B38]/10 disabled:opacity-50"
+                          >
+                            <Tag size={11} className="shrink-0 text-[#C45B38]" />
+                            <span className="font-mono-label text-[10px] font-bold text-[#F7F5F0]">
+                              {c.code}
+                            </span>
+                            <span className="text-[#F7F5F0]/40">·</span>
+                            <span className="text-[11px] text-[#F7F5F0]/70">
+                              {couponLabel(c)}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               {couponError && (

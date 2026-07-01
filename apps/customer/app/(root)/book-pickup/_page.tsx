@@ -19,6 +19,7 @@ import {
   Loader2,
   CheckCircle,
   Camera,
+  Tag,
 } from "lucide-react";
 import { Calendar } from "@workspace/ui/components/calendar";
 import {
@@ -38,7 +39,7 @@ import {
   DialogFooter,
 } from "@workspace/ui/components/dialog";
 import { toast } from "sonner";
-import { createClient } from "@workspace/supabase/client"; // adjust to your Supabase client path
+import { createClient } from "@workspace/supabase/client";
 import { loadDraft, saveDraft, clearDraft } from "@workspace/data/bookingPersistence";
 import CameraCaptureDialog, {
   type CapturedImage,
@@ -46,17 +47,37 @@ import CameraCaptureDialog, {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const BASE_FEE = 49;
 const MAX_IMAGES = 4;
 const MAX_IMAGE_MB = 5;
-const STORAGE_BUCKET = "pickup-images"; // your Supabase Storage bucket name
+const STORAGE_BUCKET = "pickup-images";
 
 const TIME_SLOTS = [
-  { id: "morning", range: "8 AM – 12 PM", label: "Morning slot" },
-  { id: "evening", range: "6 PM – 10 PM", label: "Evening slot" },
+  { id: "morning", range: "8 AM – 12 PM", label: "Morning slot", startHour: 8, endHour: 12 },
+  { id: "evening", range: "6 PM – 10 PM", label: "Evening slot", startHour: 18, endHour: 22 },
 ] as const;
 
+// const ALLOWED_PINCODE_PREFIXES = ["560", "561", "562"];
+const ALLOWED_PINCODE_PREFIXES = ["560"];
+
 type SlotId = (typeof TIME_SLOTS)[number]["id"];
+
+/**
+ * Returns true if the slot should be disabled for the selected date.
+ * Disabled when date is today AND the slot has already started (in progress or fully past).
+ */
+function isSlotDisabled(
+  slotStartHour: number,
+  slotEndHour: number,
+  selectedDate: Date | undefined,
+): boolean {
+  if (!selectedDate) return false;
+  const todayMidnight = today();
+  const isToday = selectedDate.getTime() === todayMidnight.getTime();
+  if (!isToday) return false;
+  const currentHour = new Date().getHours();
+  // Disable if the slot has already started (in progress) or has fully passed
+  return currentHour >= slotStartHour;
+}
 
 const today = () => {
   const d = new Date();
@@ -81,22 +102,35 @@ interface Address {
   pincode: string;
 }
 
+interface AppliedCoupon {
+  id: string;           // coupons.id — stored on the pickup row
+  code: string;
+  discount_type: "flat" | "percent";
+  discount_value: number;
+  description: string;
+}
+
 type SaveStatus = "idle" | "saving" | "saved";
 type DialogStep = "review" | "submitting" | "success";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Converts a data-URL (from camera) or File to a Blob ready for upload */
 async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   const res = await fetch(dataUrl);
   return res.blob();
 }
 
-/** Generates a unique storage path for an image */
 function storagePath(userId: string, fileName: string) {
   const ts = Date.now();
   const safe = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
   return `${userId}/${ts}-${safe}`;
+}
+
+/** Human-readable coupon description e.g. "20% off" or "₹50 off" */
+function couponLabel(c: AppliedCoupon) {
+  return c.discount_type === "percent"
+    ? `${c.discount_value}% off your order`
+    : `₹${c.discount_value} off your order`;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -107,8 +141,7 @@ interface BookingSummaryListProps {
   selectedAddress: Address | undefined;
   notes: string;
   imageCount: number;
-  couponCode?: string;
-  discount: number;
+  appliedCoupon: AppliedCoupon | null;
 }
 
 const BookingSummaryList = ({
@@ -117,8 +150,7 @@ const BookingSummaryList = ({
   selectedAddress,
   notes,
   imageCount,
-  couponCode,
-  discount,
+  appliedCoupon,
 }: BookingSummaryListProps) => (
   <dl className="space-y-3 text-sm">
     <div className="flex justify-between">
@@ -153,17 +185,24 @@ const BookingSummaryList = ({
         <dd className="text-[#121710]">{imageCount} attached</dd>
       </div>
     )}
-    {couponCode && discount > 0 && (
-      <div className="flex justify-between">
-        <dt className="text-[#596155]">
-          Discount{" "}
-          <span className="font-mono-label text-[10px] text-[#C45B38]">
-            {couponCode}
+    {appliedCoupon && (
+      <div className="flex justify-between items-center">
+        <dt className="text-[#596155]">Promo</dt>
+        <dd className="flex items-center gap-1.5 text-[#284226]">
+          <Tag size={11} />
+          <span className="font-mono-label text-[10px] font-bold">
+            {appliedCoupon.code}
           </span>
-        </dt>
-        <dd className="text-[#C45B38]">− ₹{discount}</dd>
+          <span className="text-[#596155]">·</span>
+          <span>{couponLabel(appliedCoupon)}</span>
+        </dd>
       </div>
     )}
+    {/* Amount is intentionally omitted — calculated by executive at pickup */}
+    <div className="flex justify-between items-center pt-1 border-t border-[#D1CDBC]">
+      <dt className="text-[#596155]">Amount</dt>
+      <dd className="text-[#596155] italic text-xs">Calculated at pickup</dd>
+    </div>
   </dl>
 );
 
@@ -207,7 +246,8 @@ const SaveIndicator = ({
 
 const BookPickup = () => {
   const router = useRouter();
-  const supabase = createClient();
+  const supabaseRef = useRef(createClient());
+  const supabase = supabaseRef.current;
 
   // ── Auth & remote data ─────────────────────────────────────────────────────
   const [userId, setUserId] = useState<string | null>(null);
@@ -221,13 +261,12 @@ const BookPickup = () => {
   const [addressId, setAddressId] = useState("");
   const [notes, setNotes] = useState("");
   const [images, setImages] = useState<CapturedImage[]>([]);
+
+  // ── Coupon state ───────────────────────────────────────────────────────────
   const [couponInput, setCouponInput] = useState("");
-  const [appliedCoupon, setAppliedCoupon] = useState<{
-    code: string;
-    discount: number;
-    description: string;
-  } | null>(null);
+  const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null);
   const [couponError, setCouponError] = useState("");
+  const [couponLoading, setCouponLoading] = useState(false);
 
   // ── Dialog / booking ───────────────────────────────────────────────────────
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -246,31 +285,40 @@ const BookPickup = () => {
 
   const selectedAddress = addresses.find((a) => a.id === addressId);
   const selectedSlot = TIME_SLOTS.find((s) => s.id === slotId);
-  const discount = appliedCoupon?.discount ?? 0;
-  const total = Math.max(0, BASE_FEE - discount);
+
+  const isPincodeServiceable = useMemo(() => {
+    if (!selectedAddress) return false;
+    const pin = selectedAddress.pincode.trim();
+    return ALLOWED_PINCODE_PREFIXES.some((prefix) => pin.startsWith(prefix));
+  }, [selectedAddress]);
+
+  // Clear the selected slot if it becomes disabled when the date changes to today
+  useEffect(() => {
+    if (slotId) {
+      const slot = TIME_SLOTS.find((s) => s.id === slotId);
+      if (slot && isSlotDisabled(slot.startHour, slot.endHour, date)) {
+        setSlotId(null);
+      }
+    }
+  }, [date, slotId]);
 
   // ── Fetch user + addresses on mount ───────────────────────────────────────
   useEffect(() => {
+    let cancelled = false;
     const init = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        router.push("/login");
-        return;
-      }
+      const { data: { user } } = await supabase.auth.getUser();
+      if (cancelled) return;
+      if (!user) { router.push("/login"); return; }
       setUserId(user.id);
 
-      // Fetch profile name
       const { data: profile } = await supabase
         .from("profiles")
         .select("full_name")
         .eq("id", user.id)
         .single();
-      if (profile?.full_name) setUserName(profile.full_name.split(" ")[0]);
+      if (!cancelled && profile?.full_name)
+        setUserName(profile.full_name.split(" ")[0]);
 
-      // Fetch saved addresses
       setLoadingAddresses(true);
       const { data: addrs, error } = await supabase
         .from("addresses")
@@ -278,12 +326,13 @@ const BookPickup = () => {
         .eq("customer_id", user.id)
         .order("is_default", { ascending: false });
 
+      if (cancelled) return;
       if (error) toast.error("Couldn't load your saved addresses.");
       else setAddresses(addrs ?? []);
       setLoadingAddresses(false);
     };
-
     init();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -299,13 +348,12 @@ const BookPickup = () => {
         setSlotId(draft.slotId as SlotId);
       if (draft.addressId) setAddressId(draft.addressId);
       if (typeof draft.notes === "string") setNotes(draft.notes);
-      // Images are NOT restored from draft — data URLs can be large and stale
     }
     setHydrated(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Autosave (no images — too heavy for localStorage) ─────────────────────
+  // ── Autosave ───────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!hydrated) return;
     const empty = !date && !slotId && !addressId && !notes && !appliedCoupon;
@@ -336,10 +384,7 @@ const BookPickup = () => {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
     const room = MAX_IMAGES - images.length;
-    if (room <= 0) {
-      toast.error(`You can attach up to ${MAX_IMAGES} pictures.`);
-      return;
-    }
+    if (room <= 0) { toast.error(`You can attach up to ${MAX_IMAGES} pictures.`); return; }
     const accepted = files.slice(0, room);
     const next: CapturedImage[] = [];
     for (const file of accepted) {
@@ -355,13 +400,10 @@ const BookPickup = () => {
           r.readAsDataURL(file);
         });
         next.push({ name: file.name, type: file.type, size: file.size, url });
-      } catch {
-        toast.error(`Couldn't read ${file.name}.`);
-      }
+      } catch { toast.error(`Couldn't read ${file.name}.`); }
     }
     if (next.length) setImages((prev) => [...prev, ...next]);
-    if (files.length > room)
-      toast(`Only added ${room} — limit is ${MAX_IMAGES}.`);
+    if (files.length > room) toast(`Only added ${room} — limit is ${MAX_IMAGES}.`);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -390,16 +432,47 @@ const BookPickup = () => {
   };
 
   // ─── Coupon ────────────────────────────────────────────────────────────────
-  // Simple client-side coupon check — replace with a Supabase RPC if needed
-  const applyCoupon = () => {
+
+  /**
+   * Calls the `validate_coupon` Supabase RPC.
+   * The function returns the coupon row if valid, or an error if not.
+   *
+   * Expected RPC response shape:
+   *   { id, code, discount_type, discount_value, description }
+   */
+  const applyCoupon = async () => {
     const code = couponInput.trim().toUpperCase();
-    if (!code) {
-      setCouponError("Enter a promo code.");
-      return;
+    if (!code) { setCouponError("Enter a promo code."); return; }
+    if (couponLoading) return;
+
+    setCouponError("");
+    setCouponLoading(true);
+
+    try {
+      const { data, error } = await supabase.rpc("validate_coupon", { p_code: code });
+
+      if (error || !data) {
+        // RPC raises an exception for invalid/expired codes — the message comes through error.message
+        setCouponError(error?.message ?? "That code isn't valid.");
+        setAppliedCoupon(null);
+        return;
+      }
+
+      setAppliedCoupon({
+        id: data.id,
+        code: data.code,
+        discount_type: data.discount_type,
+        discount_value: data.discount_value,
+        description: data.description ?? couponLabel(data),
+      });
+      setCouponInput("");
+      toast.success(`Promo code applied — ${couponLabel(data)}!`);
+    } catch (err) {
+      console.error("Coupon validation error:", err);
+      setCouponError("Couldn't validate the code. Please try again.");
+    } finally {
+      setCouponLoading(false);
     }
-    // TODO: replace with `supabase.rpc('validate_coupon', { code })` when ready
-    setCouponError("That code isn't valid.");
-    setAppliedCoupon(null);
   };
 
   const removeCoupon = () => {
@@ -410,61 +483,46 @@ const BookPickup = () => {
 
   // ─── Submit ────────────────────────────────────────────────────────────────
 
-  const canSubmit = !!(date && slotId && addressId);
+  const canSubmit = !!(date && slotId && addressId && isPincodeServiceable);
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) {
-      toast.error(
-        "Please pick a date, a time slot and a saved address before booking."
-      );
+      toast.error("Please pick a date, a time slot and a saved address before booking.");
       return;
     }
     setDialogStep("review");
     setConfirmOpen(true);
   };
 
-  /**
-   * 1. Upload all images to Supabase Storage
-   * 2. Collect their public URLs
-   * 3. Insert a new row into `pickups` with those URLs
-   */
   const confirmBooking = useCallback(async () => {
     if (!userId || !date || !slotId || !addressId) return;
     setDialogStep("submitting");
 
     // ── 1. Upload images ───────────────────────────────────────────────────
     const imageUrls: string[] = [];
-
     for (const img of images) {
       try {
         let blob: Blob;
         if (img.url.startsWith("data:")) {
           blob = await dataUrlToBlob(img.url);
         } else {
-          // Already a remote URL (shouldn't happen in this flow, but guard anyway)
           imageUrls.push(img.url);
           continue;
         }
-
         const path = storagePath(userId, img.name);
         const { error: uploadError } = await supabase.storage
           .from(STORAGE_BUCKET)
-          .upload(path, blob, {
-            contentType: img.type,
-            upsert: false,
-          });
+          .upload(path, blob, { contentType: img.type, upsert: false });
 
         if (uploadError) {
           console.error("Upload error:", uploadError);
           toast.error(`Failed to upload ${img.name}. Booking will continue without it.`);
           continue;
         }
-
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
-
+        const { data: { publicUrl } } = supabase.storage
+          .from(STORAGE_BUCKET)
+          .getPublicUrl(path);
         imageUrls.push(publicUrl);
       } catch (err) {
         console.error("Unexpected upload error:", err);
@@ -476,6 +534,8 @@ const BookPickup = () => {
     const pickupId = `BC-${Math.floor(Math.random() * 90000) + 10000}`;
 
     // ── 3. Insert pickup row ───────────────────────────────────────────────
+    // total_amount is intentionally omitted — the executive sets it at pickup.
+    // coupon_id is stored so the executive/admin can apply the discount later.
     const { data: pickup, error: insertError } = await supabase
       .from("pickups")
       .insert({
@@ -483,10 +543,10 @@ const BookPickup = () => {
         customer_id: userId,
         address_id: addressId,
         scheduled_date: format(date, "yyyy-MM-dd"),
-        scheduled_slot: slotId, // "morning" | "evening"
+        scheduled_slot: slotId,
         notes: notes || null,
         image_urls: imageUrls,
-        total_amount: total,
+        coupon_id: appliedCoupon?.id ?? null,
         status: "pending",
         payment_status: "unpaid",
       })
@@ -506,16 +566,7 @@ const BookPickup = () => {
     setSaveStatus("idle");
     setLastSavedAt(null);
     setDialogStep("success");
-  }, [
-    userId,
-    date,
-    slotId,
-    addressId,
-    notes,
-    images,
-    total,
-    supabase,
-  ]);
+  }, [userId, date, slotId, addressId, notes, images, appliedCoupon, supabase]);
 
   // ─── Reset ─────────────────────────────────────────────────────────────────
 
@@ -537,11 +588,7 @@ const BookPickup = () => {
   };
 
   const handleDialogChange = (open: boolean) => {
-    if (!open && dialogStep === "success") {
-      closeAndReset();
-      return;
-    }
-    // Prevent closing while upload/insert is in progress
+    if (!open && dialogStep === "success") { closeAndReset(); return; }
     if (dialogStep === "submitting") return;
     setConfirmOpen(open);
   };
@@ -561,28 +608,16 @@ const BookPickup = () => {
     toast("Draft cleared.");
   };
 
-  const hasAnyValue = !!(
-    date ||
-    slotId ||
-    addressId ||
-    notes ||
-    images.length ||
-    appliedCoupon
-  );
+  const hasAnyValue = !!(date || slotId || addressId || notes || images.length || appliedCoupon);
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div
-      data-testid="book-pickup-page"
-      className="px-5 sm:px-10 lg:px-14 py-8 lg:py-12"
-    >
+    <div data-testid="book-pickup-page" className="px-5 sm:px-10 lg:px-14 py-8 lg:py-12">
       {/* Header */}
       <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6 mb-10">
         <div>
-          <p className="font-mono-label text-xs text-[#596155]">
-            [ dashboard · new booking ]
-          </p>
+          <p className="font-mono-label text-xs text-[#596155]">[ dashboard · new booking ]</p>
           <h1 className="mt-3 font-display font-black tracking-tighter text-4xl sm:text-5xl text-[#121710]">
             Schedule a pickup
           </h1>
@@ -606,24 +641,17 @@ const BookPickup = () => {
         </div>
       </header>
 
-      <form
-        onSubmit={onSubmit}
-        className="grid gap-8 lg:grid-cols-12 lg:gap-10"
-      >
+      <form onSubmit={onSubmit} className="grid gap-8 lg:grid-cols-12 lg:gap-10">
         {/* LEFT COLUMN */}
         <div className="lg:col-span-8 space-y-6">
+
           {/* 01 · Date */}
-          <section
-            data-testid="section-date"
-            className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8"
-          >
+          <section data-testid="section-date" className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8">
             <div className="flex items-center gap-2 mb-5">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-sm bg-[#EDE9DC] text-[#284226]">
                 <CalendarIcon size={14} />
               </span>
-              <p className="font-mono-label text-xs text-[#596155]">
-                01 · Pickup date
-              </p>
+              <p className="font-mono-label text-xs text-[#596155]">01 · Pickup date</p>
             </div>
             <Popover>
               <PopoverTrigger asChild>
@@ -632,16 +660,11 @@ const BookPickup = () => {
                   data-testid="date-picker-trigger"
                   className="flex h-14 w-full items-center justify-between rounded-sm border border-[#D1CDBC] bg-[#F7F5F0] px-4 text-left text-base text-[#121710] hover:bg-[#EDE9DC] focus:outline-none focus:ring-2 focus:ring-[#284226]"
                 >
-                  {date
-                    ? format(date, "EEEE, d MMMM yyyy")
-                    : "Pick a date in the next 7 days"}
+                  {date ? format(date, "EEEE, d MMMM yyyy") : "Pick a date in the next 7 days"}
                   <CalendarIcon size={18} className="text-[#596155]" />
                 </button>
               </PopoverTrigger>
-              <PopoverContent
-                className="w-auto p-0 rounded-sm border-[#D1CDBC]"
-                align="start"
-              >
+              <PopoverContent className="w-auto p-0 rounded-sm border-[#D1CDBC]" align="start">
                 <Calendar
                   mode="single"
                   selected={date}
@@ -660,48 +683,38 @@ const BookPickup = () => {
           </section>
 
           {/* 02 · Time Slot */}
-          <section
-            data-testid="section-timeslot"
-            className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8"
-          >
+          <section data-testid="section-timeslot" className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8">
             <div className="flex items-center gap-2 mb-5">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-sm bg-[#EDE9DC] text-[#284226]">
                 <Clock size={14} />
               </span>
-              <p className="font-mono-label text-xs text-[#596155]">
-                02 · Time slot
-              </p>
+              <p className="font-mono-label text-xs text-[#596155]">02 · Time slot</p>
             </div>
-            <div
-              role="radiogroup"
-              data-testid="timeslot-group"
-              className="grid grid-cols-2 gap-3"
-            >
+            <div role="radiogroup" data-testid="timeslot-group" className="grid grid-cols-2 gap-3">
               {TIME_SLOTS.map((s) => {
                 const active = s.id === slotId;
+                const disabled = isSlotDisabled(s.startHour, s.endHour, date);
                 return (
                   <button
                     key={s.id}
                     type="button"
                     role="radio"
                     aria-checked={active}
+                    aria-disabled={disabled}
+                    disabled={disabled}
                     data-testid={`timeslot-${s.id}`}
-                    onClick={() => setSlotId(s.id)}
+                    onClick={() => !disabled && setSlotId(s.id)}
                     className={`rounded-sm border p-5 text-left transition-all ${
-                      active
+                      disabled
+                        ? "border-[#D1CDBC] bg-[#F7F5F0] text-[#596155]/40 cursor-not-allowed opacity-50"
+                        : active
                         ? "border-[#284226] bg-[#284226] text-[#F7F5F0]"
                         : "border-[#D1CDBC] bg-[#F7F5F0] text-[#121710] hover:border-[#284226]"
                     }`}
                   >
-                    <p className="font-display text-lg font-bold tracking-tight">
-                      {s.range}
-                    </p>
-                    <p
-                      className={`mt-1 text-xs ${
-                        active ? "text-[#F7F5F0]/70" : "text-[#596155]"
-                      }`}
-                    >
-                      {s.label}
+                    <p className="font-display text-lg font-bold tracking-tight">{s.range}</p>
+                    <p className={`mt-1 text-xs ${active ? "text-[#F7F5F0]/70" : disabled ? "text-[#596155]/40" : "text-[#596155]"}`}>
+                      {disabled ? (new Date().getHours() >= s.endHour ? "Slot passed" : "Slot in progress") : s.label}
                     </p>
                   </button>
                 );
@@ -710,23 +723,16 @@ const BookPickup = () => {
           </section>
 
           {/* 03 · Address */}
-          <section
-            data-testid="section-address"
-            className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8"
-          >
+          <section data-testid="section-address" className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8">
             <div className="flex items-center gap-2 mb-5">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-sm bg-[#EDE9DC] text-[#284226]">
                 <MapPin size={14} />
               </span>
-              <p className="font-mono-label text-xs text-[#596155]">
-                03 · Pickup address
-              </p>
+              <p className="font-mono-label text-xs text-[#596155]">03 · Pickup address</p>
             </div>
-
             {loadingAddresses ? (
               <div className="flex items-center gap-2 h-14 text-sm text-[#596155]">
-                <Loader2 size={14} className="animate-spin" /> Loading your
-                addresses…
+                <Loader2 size={14} className="animate-spin" /> Loading your addresses…
               </div>
             ) : addresses.length === 0 ? (
               <p className="text-sm text-[#596155]">
@@ -739,13 +745,12 @@ const BookPickup = () => {
                 </span>
               </p>
             ) : (
-              <div
-                role="radiogroup"
-                data-testid="address-group"
-                className="space-y-2"
-              >
+              <div role="radiogroup" data-testid="address-group" className="space-y-2">
                 {addresses.map((a) => {
                   const active = a.id === addressId;
+                  const isServiceable = ALLOWED_PINCODE_PREFIXES.some((prefix) =>
+                    a.pincode.trim().startsWith(prefix)
+                  );
                   return (
                     <button
                       key={a.id}
@@ -756,46 +761,49 @@ const BookPickup = () => {
                       onClick={() => setAddressId(a.id)}
                       className={`w-full text-left rounded-sm border px-4 py-3 transition-all ${
                         active
-                          ? "border-[#284226] bg-[#EDE9DC]"
+                          ? isServiceable
+                            ? "border-[#284226] bg-[#EDE9DC]"
+                            : "border-[#C45B38] bg-[#FDF2F0]"
                           : "border-[#D1CDBC] bg-[#F7F5F0] hover:border-[#284226]"
                       }`}
                     >
-                      <p className="font-medium text-sm text-[#121710]">
-                        {a.label ?? "Address"}
-                      </p>
-                      <p className="text-xs text-[#596155] mt-0.5">
-                        {a.address_line1}
-                        {a.address_line2 ? `, ${a.address_line2}` : ""},{" "}
-                        {a.city} — {a.pincode}
-                      </p>
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-medium text-sm text-[#121710]">{a.label ?? "Address"}</p>
+                          <p className="text-xs text-[#596155] mt-0.5">
+                            {a.address_line1}{a.address_line2 ? `, ${a.address_line2}` : ""}, {a.city} — {a.pincode}
+                          </p>
+                        </div>
+                        {!isServiceable && (
+                          <span className="text-[10px] font-mono-label font-bold text-[#C45B38] bg-[#FDF2F0] px-2 py-0.5 rounded-sm border border-[#C45B38]/30">
+                            UNSERVICEABLE
+                          </span>
+                        )}
+                      </div>
                     </button>
                   );
                 })}
               </div>
             )}
+            {selectedAddress && !isPincodeServiceable && (
+              <p className="mt-3 text-xs text-[#C45B38] font-medium flex items-center gap-1.5">
+                ⚠️ We only support pickups in pincodes starting with 560 (Bengaluru region).
+              </p>
+            )}
           </section>
 
           {/* 04 · Notes */}
-          <section
-            data-testid="section-notes"
-            className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8"
-          >
+          <section data-testid="section-notes" className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8">
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <span className="inline-flex h-7 w-7 items-center justify-center rounded-sm bg-[#EDE9DC] text-[#284226]">
                   <StickyNote size={14} />
                 </span>
-                <p className="font-mono-label text-xs text-[#596155]">
-                  04 · Additional notes
-                </p>
+                <p className="font-mono-label text-xs text-[#596155]">04 · Additional notes</p>
               </div>
-              <p className="font-mono-label text-[10px] text-[#596155]">
-                Optional
-              </p>
+              <p className="font-mono-label text-[10px] text-[#596155]">Optional</p>
             </div>
-            <Label htmlFor="notes" className="sr-only">
-              Additional notes
-            </Label>
+            <Label htmlFor="notes" className="sr-only">Additional notes</Label>
             <Textarea
               id="notes"
               data-testid="notes-textarea"
@@ -806,46 +814,31 @@ const BookPickup = () => {
               placeholder="Gate code, e-waste mixed in, leave bags by the side gate..."
               className="rounded-sm border-[#D1CDBC] focus-visible:ring-[#284226]"
             />
-            <p className="mt-2 text-right text-xs text-[#596155]">
-              {notes.length}/500
-            </p>
+            <p className="mt-2 text-right text-xs text-[#596155]">{notes.length}/500</p>
           </section>
 
           {/* 05 · Pictures */}
-          <section
-            data-testid="section-pictures"
-            className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8"
-          >
+          <section data-testid="section-pictures" className="rounded-sm border border-[#D1CDBC] bg-white p-6 sm:p-8">
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <span className="inline-flex h-7 w-7 items-center justify-center rounded-sm bg-[#EDE9DC] text-[#284226]">
                   <ImageIcon size={14} />
                 </span>
-                <p className="font-mono-label text-xs text-[#596155]">
-                  05 · Pictures
-                </p>
+                <p className="font-mono-label text-xs text-[#596155]">05 · Pictures</p>
               </div>
               <p className="font-mono-label text-[10px] text-[#596155]">
                 {images.length}/{MAX_IMAGES} · up to {MAX_IMAGE_MB} MB each
               </p>
             </div>
-
             {images.length > 0 && (
-              <div
-                data-testid="image-previews-grid"
-                className="mb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3"
-              >
+              <div data-testid="image-previews-grid" className="mb-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                 {images.map((img, idx) => (
                   <div
                     key={`${img.name}-${idx}`}
                     data-testid={`image-preview-${idx}`}
                     className="group relative overflow-hidden rounded-sm border border-[#D1CDBC]"
                   >
-                    <img
-                      src={img.url}
-                      alt={img.name || `pic-${idx}`}
-                      className="h-28 w-full object-cover"
-                    />
+                    <img src={img.url} alt={img.name || `pic-${idx}`} className="h-28 w-full object-cover" />
                     <button
                       type="button"
                       onClick={() => removeImage(idx)}
@@ -862,12 +855,8 @@ const BookPickup = () => {
                 ))}
               </div>
             )}
-
             {images.length < MAX_IMAGES && (
-              <div
-                data-testid="picture-actions"
-                className="grid gap-3 sm:grid-cols-2"
-              >
+              <div data-testid="picture-actions" className="grid gap-3 sm:grid-cols-2">
                 <label
                   htmlFor="images"
                   data-testid="image-upload-label"
@@ -875,13 +864,9 @@ const BookPickup = () => {
                 >
                   <UploadCloud size={22} className="text-[#596155]" />
                   <p className="mt-2 text-sm text-[#121710] font-medium">
-                    {images.length === 0
-                      ? "Upload from device"
-                      : "Add more from device"}
+                    {images.length === 0 ? "Upload from device" : "Add more from device"}
                   </p>
-                  <p className="text-xs text-[#596155]">
-                    PNG / JPG · up to {MAX_IMAGE_MB} MB each
-                  </p>
+                  <p className="text-xs text-[#596155]">PNG / JPG · up to {MAX_IMAGE_MB} MB each</p>
                   <input
                     id="images"
                     ref={fileInputRef}
@@ -899,16 +884,9 @@ const BookPickup = () => {
                   data-testid="open-camera-btn"
                   className="group flex h-32 w-full cursor-pointer flex-col items-center justify-center rounded-sm border-2 border-dashed border-[#D1CDBC] bg-[#171A15] text-center text-[#F7F5F0] transition-colors hover:border-[#C45B38] hover:bg-[#121710]"
                 >
-                  <Camera
-                    size={22}
-                    className="text-[#F7F5F0]/80 group-hover:text-[#C45B38]"
-                  />
-                  <p className="mt-2 text-sm font-medium">
-                    Capture with camera
-                  </p>
-                  <p className="text-xs text-[#F7F5F0]/60">
-                    Takes a photo right here
-                  </p>
+                  <Camera size={22} className="text-[#F7F5F0]/80 group-hover:text-[#C45B38]" />
+                  <p className="mt-2 text-sm font-medium">Capture with camera</p>
+                  <p className="text-xs text-[#F7F5F0]/60">Takes a photo right here</p>
                 </button>
               </div>
             )}
@@ -918,68 +896,47 @@ const BookPickup = () => {
         {/* RIGHT SUMMARY */}
         <aside className="lg:col-span-4">
           <div className="lg:sticky lg:top-8 rounded-sm border border-[#D1CDBC] bg-[#171A15] text-[#F7F5F0] p-6 sm:p-8">
-            <p className="font-mono-label text-xs text-[#F7F5F0]/60">
-              Booking summary
-            </p>
-            <h3 className="mt-3 font-display text-2xl font-bold tracking-tight">
-              On-demand pickup
-            </h3>
+            <p className="font-mono-label text-xs text-[#F7F5F0]/60">Booking summary</p>
+            <h3 className="mt-3 font-display text-2xl font-bold tracking-tight">On-demand pickup</h3>
 
             <dl className="mt-7 space-y-5 text-sm">
               <div className="flex justify-between gap-4">
                 <dt className="text-[#F7F5F0]/60">Date</dt>
-                <dd data-testid="summary-date">
-                  {date ? format(date, "EEE, d MMM") : "—"}
-                </dd>
+                <dd data-testid="summary-date">{date ? format(date, "EEE, d MMM") : "—"}</dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-[#F7F5F0]/60">Slot</dt>
-                <dd data-testid="summary-slot">
-                  {selectedSlot ? selectedSlot.range : "—"}
-                </dd>
+                <dd data-testid="summary-slot">{selectedSlot ? selectedSlot.range : "—"}</dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-[#F7F5F0]/60">Address</dt>
-                <dd
-                  className="text-right max-w-[60%]"
-                  data-testid="summary-address"
-                >
-                  {selectedAddress
-                    ? `${selectedAddress.label ?? ""} · ${selectedAddress.city}`
-                    : "—"}
+                <dd className="text-right max-w-[60%]" data-testid="summary-address">
+                  {selectedAddress ? `${selectedAddress.label ?? ""} · ${selectedAddress.city}` : "—"}
                 </dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-[#F7F5F0]/60">Pictures</dt>
-                <dd data-testid="summary-photo">
-                  {images.length > 0 ? `${images.length} attached` : "—"}
-                </dd>
+                <dd data-testid="summary-photo">{images.length > 0 ? `${images.length} attached` : "—"}</dd>
               </div>
             </dl>
 
             {/* Promo code */}
             <div className="mt-8 pt-6 border-t border-[#F7F5F0]/15">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 mb-3">
                 <BadgePercent size={14} className="text-[#C45B38]" />
-                <p className="font-mono-label text-[10px] text-[#F7F5F0]/60">
-                  Promo code
-                </p>
+                <p className="font-mono-label text-[10px] text-[#F7F5F0]/60">Promo code</p>
               </div>
+
               {appliedCoupon ? (
                 <div
                   data-testid="coupon-applied"
-                  className="mt-3 flex items-center justify-between gap-2 rounded-sm border border-[#284226] bg-[#284226]/40 px-3 py-2.5"
+                  className="flex items-center justify-between gap-2 rounded-sm border border-[#284226] bg-[#284226]/40 px-3 py-2.5"
                 >
                   <div className="min-w-0">
-                    <p
-                      className="font-display text-sm font-bold tracking-tight text-[#F7F5F0]"
-                      data-testid="coupon-applied-code"
-                    >
+                    <p className="font-display text-sm font-bold tracking-tight text-[#F7F5F0]" data-testid="coupon-applied-code">
                       {appliedCoupon.code}
                     </p>
-                    <p className="text-[11px] text-[#F7F5F0]/70 truncate">
-                      {appliedCoupon.description}
-                    </p>
+                    <p className="text-[11px] text-[#F7F5F0]/70 truncate">{appliedCoupon.description}</p>
                   </div>
                   <button
                     type="button"
@@ -992,76 +949,49 @@ const BookPickup = () => {
                   </button>
                 </div>
               ) : (
-                <div className="mt-3 flex gap-2">
+                <div className="flex gap-2">
                   <Input
                     value={couponInput}
                     onChange={(e) => {
                       setCouponInput(e.target.value.toUpperCase());
                       if (couponError) setCouponError("");
                     }}
-                    onKeyDown={(e) => e.key === "Enter" && applyCoupon()}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); applyCoupon(); } }}
                     placeholder="ENTER CODE"
                     data-testid="coupon-input"
-                    className="h-10 rounded-sm bg-[#F7F5F0]/5 border-[#F7F5F0]/20 text-[#F7F5F0] placeholder:text-[#F7F5F0]/40 focus-visible:ring-[#C45B38] uppercase tracking-wider"
+                    disabled={couponLoading}
+                    className="h-10 rounded-sm bg-[#F7F5F0]/5 border-[#F7F5F0]/20 text-[#F7F5F0] placeholder:text-[#F7F5F0]/40 focus-visible:ring-[#C45B38] uppercase tracking-wider disabled:opacity-50"
                   />
                   <button
                     type="button"
                     onClick={applyCoupon}
+                    disabled={couponLoading}
                     data-testid="coupon-apply-btn"
-                    className="rounded-sm bg-[#C45B38] px-3 text-xs font-medium text-[#F7F5F0] hover:bg-[#A64A2B] transition-colors"
+                    className="inline-flex items-center justify-center gap-1.5 rounded-sm bg-[#C45B38] px-3 text-xs font-medium text-[#F7F5F0] hover:bg-[#A64A2B] transition-colors disabled:opacity-60"
                   >
-                    Apply
+                    {couponLoading ? <Loader2 size={12} className="animate-spin" /> : "Apply"}
                   </button>
                 </div>
               )}
+
               {couponError && (
-                <p
-                  data-testid="coupon-error"
-                  className="mt-2 text-xs text-[#C45B38]"
-                >
+                <p data-testid="coupon-error" className="mt-2 text-xs text-[#C45B38]">
                   {couponError}
                 </p>
               )}
             </div>
 
-            {/* Fee block */}
-            <div className="mt-8 border-t border-[#F7F5F0]/15 pt-6 space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-[#F7F5F0]/60">Pickup fee</span>
-                <span
-                  data-testid="summary-fee"
-                  className={
-                    discount > 0
-                      ? "text-[#F7F5F0]/60 line-through"
-                      : "text-[#F7F5F0]"
-                  }
-                >
-                  ₹{BASE_FEE}
-                </span>
-              </div>
-              {discount > 0 && (
-                <div
-                  className="flex justify-between text-sm"
-                  data-testid="summary-discount-row"
-                >
-                  <span className="text-[#F7F5F0]/60">Discount</span>
-                  <span className="text-[#C45B38]">− ₹{discount}</span>
-                </div>
-              )}
-              <div className="flex items-end justify-between pt-2">
-                <div>
-                  <p className="font-mono-label text-[10px] text-[#F7F5F0]/60">
-                    Total
-                  </p>
-                  <p
-                    className="font-display text-3xl font-black tracking-tight"
-                    data-testid="summary-total"
-                  >
-                    ₹{total}
-                  </p>
-                </div>
-                <p className="text-xs text-[#F7F5F0]/60">GST included</p>
-              </div>
+            {/* Amount note — no figure shown until executive logs it */}
+            <div className="mt-8 border-t border-[#F7F5F0]/15 pt-6">
+              <p className="font-mono-label text-[10px] text-[#F7F5F0]/60">Amount</p>
+              <p className="mt-2 text-sm text-[#F7F5F0]/70 leading-relaxed">
+                The final amount will be calculated by our executive when they collect your items.
+                {appliedCoupon && (
+                  <span className="block mt-1 text-[#284226]">
+                    Your promo <span className="font-bold">{appliedCoupon.code}</span> will be applied automatically.
+                  </span>
+                )}
+              </p>
             </div>
 
             <button
@@ -1078,8 +1008,7 @@ const BookPickup = () => {
               <ArrowRight size={16} />
             </button>
             <p className="mt-3 text-[11px] leading-relaxed text-[#F7F5F0]/50">
-              You won&apos;t be charged until our partner arrives. Cancel
-              anytime before the slot opens.
+              Payment is collected by the executive at pickup. Cancel anytime before the slot opens.
             </p>
           </div>
         </aside>
@@ -1088,20 +1017,14 @@ const BookPickup = () => {
       {/* Confirmation / Success dialog */}
       <Dialog open={confirmOpen} onOpenChange={handleDialogChange}>
         <DialogContent
-          data-testid={
-            dialogStep === "success"
-              ? "booking-success-dialog"
-              : "booking-confirm-dialog"
-          }
+          data-testid={dialogStep === "success" ? "booking-success-dialog" : "booking-confirm-dialog"}
           className="rounded-sm border-[#D1CDBC] bg-[#F7F5F0] max-w-md p-6"
         >
           {/* ── Review step ── */}
           {dialogStep === "review" && (
             <>
               <DialogHeader className="text-left space-y-1.5">
-                <p className="font-mono-label text-xs text-[#596155]">
-                  Confirm booking
-                </p>
+                <p className="font-mono-label text-xs text-[#596155]">Confirm booking</p>
                 <DialogTitle className="font-display text-2xl font-black tracking-tight text-[#121710]">
                   Ready to lock this in?
                 </DialogTitle>
@@ -1116,20 +1039,8 @@ const BookPickup = () => {
                   selectedAddress={selectedAddress}
                   notes={notes}
                   imageCount={images.length}
-                  couponCode={appliedCoupon?.code}
-                  discount={discount}
+                  appliedCoupon={appliedCoupon}
                 />
-                <div className="mt-4 flex items-center justify-between">
-                  <p className="font-mono-label text-[10px] text-[#596155]">
-                    Total
-                  </p>
-                  <p
-                    className="font-display text-2xl font-black tracking-tight text-[#121710]"
-                    data-testid="confirm-modal-total"
-                  >
-                    ₹{total}
-                  </p>
-                </div>
               </div>
               <DialogFooter className="flex-row gap-2 mt-5">
                 <button
@@ -1157,13 +1068,9 @@ const BookPickup = () => {
             <div className="py-10 flex flex-col items-center gap-4 text-center">
               <Loader2 size={32} className="animate-spin text-[#284226]" />
               <p className="font-display text-lg font-bold text-[#121710]">
-                {images.length > 0
-                  ? "Uploading photos & saving your booking…"
-                  : "Saving your booking…"}
+                {images.length > 0 ? "Uploading photos & saving your booking…" : "Saving your booking…"}
               </p>
-              <p className="text-sm text-[#596155]">
-                This will only take a moment.
-              </p>
+              <p className="text-sm text-[#596155]">This will only take a moment.</p>
             </div>
           )}
 
@@ -1183,14 +1090,9 @@ const BookPickup = () => {
                 </DialogTitle>
                 <DialogDescription className="text-[#596155]">
                   Our partner will arrive on{" "}
-                  <span className="text-[#121710] font-medium">
-                    {date && format(date, "EEEE, d MMM")}
-                  </span>{" "}
+                  <span className="text-[#121710] font-medium">{date && format(date, "EEEE, d MMM")}</span>{" "}
                   between{" "}
-                  <span className="text-[#121710] font-medium">
-                    {selectedSlot?.range}
-                  </span>
-                  .
+                  <span className="text-[#121710] font-medium">{selectedSlot?.range}</span>.
                 </DialogDescription>
               </DialogHeader>
               <div className="mt-5 border-y border-[#D1CDBC] py-4">
@@ -1200,45 +1102,22 @@ const BookPickup = () => {
                   selectedAddress={selectedAddress}
                   notes={notes}
                   imageCount={images.length}
-                  couponCode={appliedCoupon?.code}
-                  discount={discount}
+                  appliedCoupon={appliedCoupon}
                 />
-                <div className="mt-4 flex items-center justify-between">
-                  <p className="font-mono-label text-[10px] text-[#596155]">
-                    Charged
-                  </p>
-                  <p
-                    className="font-display text-2xl font-black tracking-tight text-[#121710]"
-                    data-testid="success-modal-total"
-                  >
-                    ₹{total}
-                  </p>
-                </div>
               </div>
               <div className="mt-5">
-                <p className="font-mono-label text-[10px] text-[#596155]">
-                  What happens next
-                </p>
+                <p className="font-mono-label text-[10px] text-[#596155]">What happens next</p>
                 <ol className="mt-3 space-y-2 text-sm text-[#121710]">
                   <li className="flex gap-2">
-                    <Sparkles
-                      size={14}
-                      className="text-[#C45B38] mt-0.5 shrink-0"
-                    />
+                    <Sparkles size={14} className="text-[#C45B38] mt-0.5 shrink-0" />
                     SMS confirmation sent to your phone now.
                   </li>
                   <li className="flex gap-2">
-                    <Sparkles
-                      size={14}
-                      className="text-[#C45B38] mt-0.5 shrink-0"
-                    />
+                    <Sparkles size={14} className="text-[#C45B38] mt-0.5 shrink-0" />
                     Partner name &amp; live location 30 min before pickup.
                   </li>
                   <li className="flex gap-2">
-                    <Sparkles
-                      size={14}
-                      className="text-[#C45B38] mt-0.5 shrink-0"
-                    />
+                    <Sparkles size={14} className="text-[#C45B38] mt-0.5 shrink-0" />
                     Receipt with weight &amp; recycling impact, post-pickup.
                   </li>
                 </ol>
@@ -1246,11 +1125,7 @@ const BookPickup = () => {
               <DialogFooter className="flex-row gap-2 mt-6">
                 <button
                   type="button"
-                  onClick={() => {
-                    const id = bookingId;
-                    closeAndReset();
-                    router.push(`/dashboard/pickups/${id}`);
-                  }}
+                  onClick={() => { const id = bookingId; closeAndReset(); router.push(`/dashboard/pickups/${id}`); }}
                   data-testid="booking-success-view-btn"
                   className="flex-1 rounded-sm border border-[#121710] px-4 py-3 text-sm font-medium text-[#121710] hover:bg-[#121710] hover:text-[#F7F5F0] transition-colors"
                 >
