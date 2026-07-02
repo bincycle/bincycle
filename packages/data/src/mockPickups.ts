@@ -229,7 +229,7 @@ export const coupons: Coupon[] = [
         code: "FIRSTPICKUP",
         description: "Your first pickup is on us",
         type: "flat",
-        value: 149,
+        value: 49,
     },
 ];
 

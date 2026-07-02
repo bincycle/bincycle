@@ -10,16 +10,17 @@ interface Office {
 const offices: Office[] = [
   {
     city: "Bengaluru — HQ",
-    addr: "WeWork Galaxy, 43 Residency Rd, Bengaluru 560025",
+    // addr: "WeWork Galaxy, 43 Residency Rd, Bengaluru 560025",
+    addr: "#06, Greenslot Consumer Service Private Limited, Sri Nagar, Doddaballapura, Bengaluru Rural, Karnataka, 561203",
   },
-  {
-    city: "Mumbai",
-    addr: "BKC Annex, Bandra-Kurla Complex, Mumbai 400051",
-  },
-  {
-    city: "Gurugram",
-    addr: "Two Horizon Centre, Sector 43, Gurugram 122002",
-  },
+  // {
+  //   city: "Mumbai",
+  //   addr: "BKC Annex, Bandra-Kurla Complex, Mumbai 400051",
+  // },
+  // {
+  //   city: "Gurugram",
+  //   addr: "Two Horizon Centre, Sector 43, Gurugram 122002",
+  // },
 ];
 
 export default function ContactPage() {
@@ -84,7 +85,7 @@ export default function ContactPage() {
                     data-testid="contact-phone"
                     className="text-[#121710] font-medium hover:text-[#C45B38]"
                   >
-                    +91 80 1234 5678
+                    +91 87 4708 5906
                   </a>
                 </div>
               </div>

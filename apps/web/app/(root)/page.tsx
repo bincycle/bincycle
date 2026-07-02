@@ -187,7 +187,7 @@ export default function HomePage() {
                 [ honest pricing ]
               </p>
               <h2 className="mt-4 font-display font-black tracking-tighter text-4xl sm:text-5xl text-[#121710]">
-                Three ways to get started
+                Pricing plans for everyone
               </h2>
             </SectionReveal>
             <SectionReveal delay={0.1} className="lg:col-span-5">
@@ -198,7 +198,7 @@ export default function HomePage() {
             </SectionReveal>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {pricingPlans.map((plan) => (
               <SectionReveal
                 key={plan.id}
@@ -251,7 +251,7 @@ export default function HomePage() {
                   ))}
                 </ul>
                 <Link
-                  href="/pricing"
+                  href={plan.id === "business" ? "/contact" : "/pricing"}
                   data-testid={`home-pricing-cta-${plan.id}`}
                   className={`mt-7 inline-flex items-center justify-center rounded-sm px-5 py-3 text-sm font-medium transition-colors ${
                     plan.accent

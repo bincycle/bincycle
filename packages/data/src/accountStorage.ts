@@ -224,9 +224,10 @@ export const mockLoginHistory: LoginHistoryEntry[] = (() => {
     ];
 })();
 
+
 // ----- Billing mocks -----
 export const billingPlan: BillingPlan = {
-    name: "Weekly",
+    name: "Upto 40kg",
     price: "₹499",
     cadence: "per month",
     renewsOn: (() => {
@@ -234,8 +235,8 @@ export const billingPlan: BillingPlan = {
         d.setDate(d.getDate() + 12);
         return d.toISOString();
     })(),
-    bagsRemaining: 3,
-    bagsTotal: 4,
+    bagsRemaining: 6,
+    bagsTotal: 8,
 };
 
 export const mockPaymentMethods: PaymentMethod[] = [
@@ -266,28 +267,28 @@ export const mockInvoices: Invoice[] = [
     {
         id: "INV-2026-0218",
         date: monthAgo(0),
-        plan: "Weekly · Feb",
+        plan: "Upto 40kg · Feb",
         amount: 499,
         status: "paid",
     },
     {
         id: "INV-2026-0118",
         date: monthAgo(1),
-        plan: "Weekly · Jan",
+        plan: "Upto 40kg · Jan",
         amount: 499,
         status: "paid",
     },
     {
         id: "INV-2025-1218",
         date: monthAgo(2),
-        plan: "Weekly · Dec",
+        plan: "Upto 40kg · Dec",
         amount: 499,
         status: "paid",
     },
     {
         id: "INV-2025-1118",
         date: monthAgo(3),
-        plan: "Weekly · Nov",
+        plan: "Upto 40kg · Nov",
         amount: 449,
         status: "paid",
     },
